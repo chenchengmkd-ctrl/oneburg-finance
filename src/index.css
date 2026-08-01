@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-gray-50 text-gray-900 font-sans; }
+}
+
+@layer components {
+  .card { @apply bg-white rounded-xl shadow-sm border border-gray-100 p-4; }
+  .card-header { @apply text-sm font-semibold text-gray-500 mb-2 uppercase tracking-wide; }
+  .input-cell { @apply w-full text-right px-2 py-1 border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm; }
+  .badge-corp { @apply bg-corp-light text-corp-dark text-xs font-bold px-2 py-0.5 rounded; }
+  .badge-pers { @apply bg-pers-light text-pers-dark text-xs font-bold px-2 py-0.5 rounded; }
+  .badge-loan { @apply bg-loan-light text-loan-dark text-xs font-bold px-2 py-0.5 rounded; }
+  .nav-link { @apply flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors; }
+  .nav-link.active { @apply bg-blue-900 text-white; }
+  .nav-link:not(.active) { @apply text-blue-200 hover:bg-blue-800; }
+  .section-header { @apply text-xs font-bold uppercase tracking-widest text-gray-400 mb-3 mt-5; }
+  .amount-pos { @apply text-green-600 font-bold; }
+  .amount-neg { @apply text-red-600 font-bold; }
+}
