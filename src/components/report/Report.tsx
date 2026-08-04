@@ -153,7 +153,7 @@ export default function Report() {
   )
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-4 sm:p-6 max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           {viewMode === 'input' && (
@@ -187,14 +187,14 @@ export default function Report() {
       {viewMode === 'list' ? (
         <ReportList series={savedSeries} onEdit={(date) => { setSelectedDate(date); setViewMode('input') }} />
       ) : (
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
           {/* GMO個人 */}
           <div className="card border-l-4 border-green-500">
             <div className="flex items-center gap-1.5 text-xs font-bold text-green-600 uppercase tracking-wide mb-3">
               <User size={14}/> GMO個人
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <OverrideInput label="昨日残" autoValue={day.persPrev} override={report.pers.prevOverride}
                 onChange={v => savePers({ prevOverride: v })} ring="focus:ring-green-400"/>
               <NInput label="入金予定" value={report.pending.persExpected} onChange={v => savePending({ persExpected: v })} ring="focus:ring-green-400"/>
@@ -210,7 +210,7 @@ export default function Report() {
             <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 uppercase tracking-wide mb-3">
               <Building2 size={14}/> GMO法人
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <OverrideInput label="昨日残" autoValue={day.corpPrev} override={report.corp.prevOverride}
                 onChange={v => saveCorp({ prevOverride: v })} ring="focus:ring-blue-400"/>
               <NInput label="スクエア入金予定" value={report.pending.corpSquare} onChange={v => savePending({ corpSquare: v })} ring="focus:ring-blue-400"/>
@@ -226,7 +226,7 @@ export default function Report() {
             <div className="flex items-center gap-1.5 text-xs font-bold text-amber-600 uppercase tracking-wide mb-3">
               <Coins size={14}/> 屋台うなぎ現金（レジ金除く）
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <OverrideInput label="昨日残" autoValue={day.cashPrev} override={report.cash.prevOverride}
                 onChange={v => saveCash({ prevOverride: v })} ring="focus:ring-amber-400"/>
               <NInput label="本日現金売上" value={report.cash.sales} onChange={v => saveCash({ sales: v })} ring="focus:ring-amber-400"/>

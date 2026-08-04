@@ -54,7 +54,7 @@ export default function PL() {
   }
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-4 sm:p-6 max-w-6xl">
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => setMonth(m => shiftMonth(m, -1))} className="p-1.5 rounded hover:bg-gray-200 transition"><ChevronLeft size={20}/></button>
         <div>
@@ -87,7 +87,7 @@ export default function PL() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {/* 売上高 */}
             <div>
               <p className="section-header">売上高</p>
@@ -139,6 +139,39 @@ export default function PL() {
               </div>
             </div>
           </div>
+
+          {/* 品目別内訳：どの店にいくら、ではなく何にコストをかけているかを見る */}
+          {pl.labelBreakdown.some(c => c.items.length > 0) && (
+            <>
+              <p className="section-header mt-6">品目別内訳</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                {pl.labelBreakdown.filter(c => c.items.length > 0).map(cat => {
+                  const catMax = Math.max(1, ...cat.items.map(i => i.amount))
+                  return (
+                    <div key={cat.category} className="card">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-gray-500">{cat.categoryLabel}</span>
+                        <span className="text-xs font-black text-gray-700">{fmt(cat.total)}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {cat.items.map(item => (
+                          <div key={item.label}>
+                            <div className="flex items-center gap-2 text-xs mb-0.5">
+                              <span className="flex-1 truncate text-gray-600">{item.label}{item.count > 1 ? ` ×${item.count}` : ''}</span>
+                              <span className="font-bold text-gray-700 shrink-0">{fmtShort(item.amount)}</span>
+                            </div>
+                            <div className="h-1 bg-gray-100 rounded overflow-hidden">
+                              <div className={`h-full ${CATEGORY_COLOR[cat.category]} rounded`} style={{ width: `${(item.amount / catMax) * 100}%` }}/>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
 
           {/* 日報：日別の売上・利益 */}
           <div className="flex items-center justify-between mt-6">

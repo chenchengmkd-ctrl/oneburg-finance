@@ -40,7 +40,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="p-6 max-w-xl">
+    <div className="p-4 sm:p-6 max-w-xl">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">設定</h1>
 
       <div className="card mb-4">

@@ -22,9 +22,9 @@ function BigInput({ label, value, onChange, color }: {
 }
 
 // 食材・備品などの仕入れ：複数明細＋過去に使った項目名を選択肢として提示
-function QuickItemsCard({ title, color, category, items, labelOptions, onChange }: {
+function QuickItemsCard({ title, color, category, items, labelOptions, onChange, hint }: {
   title: string; color: string; category: ExpenseCategory
-  items: LineItem[]; labelOptions: string[]; onChange: (items: LineItem[]) => void
+  items: LineItem[]; labelOptions: string[]; onChange: (items: LineItem[]) => void; hint?: string
 }) {
   const total = sumItems(items)
   const listId = `quick-labels-${category}`
@@ -34,10 +34,11 @@ function QuickItemsCard({ title, color, category, items, labelOptions, onChange 
 
   return (
     <div className="card mb-6">
-      <div className="flex items-center justify-between mb-3">
+      <div className={`flex items-center justify-between ${hint ? 'mb-1' : 'mb-3'}`}>
         <span className={`text-sm font-bold ${color}`}>{title}</span>
         <span className={`text-lg font-black ${color}`}>{fmt(total)}</span>
       </div>
+      {hint && <p className="text-[11px] text-gray-400 mb-2">{hint}</p>}
       <datalist id={listId}>
         {labelOptions.map(l => <option key={l} value={l}/>)}
       </datalist>
@@ -123,7 +124,7 @@ export default function DailyEntry() {
   const monthProfitable = monthPL.profit >= 0
 
   return (
-    <div className={`p-6 ${viewMode === 'list' ? 'max-w-3xl' : 'max-w-2xl'}`}>
+    <div className={`p-4 sm:p-6 ${viewMode === 'list' ? 'max-w-3xl' : 'max-w-2xl'}`}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           {viewMode === 'input' && (
@@ -245,7 +246,8 @@ export default function DailyEntry() {
       </div>
 
       <QuickItemsCard title="仕入れ（食材）" color="text-red-700" category="ingredient"
-        items={ingredientItems} labelOptions={ingredientLabels} onChange={items => updateCategoryItems('ingredient', items)}/>
+        items={ingredientItems} labelOptions={ingredientLabels} onChange={items => updateCategoryItems('ingredient', items)}
+        hint="同じ店で複数買った場合は行を分けて「日本酒」「お米」のように入力すると、損益表で品目別に見られます"/>
       <QuickItemsCard title="仕入れ（備品）" color="text-orange-700" category="supplies"
         items={suppliesItems} labelOptions={suppliesLabels} onChange={items => updateCategoryItems('supplies', items)}/>
 

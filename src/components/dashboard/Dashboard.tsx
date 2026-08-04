@@ -58,7 +58,7 @@ export default function Dashboard() {
   const totalLoanRemaining = loans.reduce((s, l) => s + Math.max(0, l.totalAmount - l.paidAmount), 0)
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-4 sm:p-6 max-w-5xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800">ダッシュボード</h1>
         <p className="text-gray-400 text-sm mt-1">{month.replace('-', '年')}月 / {todayStr} 時点</p>
@@ -76,7 +76,7 @@ export default function Dashboard() {
         <>
           {/* 資金状況 */}
           <p className="section-header">資金状況（残高報告 {latest.date.slice(5).replace('-', '/')} 時点）</p>
-          <div className="grid grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <AmountCard label="GMO個人" amount={latest.persBal} sub="残高目安" color="border-green-500" icon={User} />
             <AmountCard label="GMO法人" amount={latest.corpBal} sub="残高目安" color="border-blue-500" icon={Building2} />
             <AmountCard label="現金（レジ金除く）" amount={latest.cashBal} sub="残高目安" color="border-amber-500" icon={Coins} />
@@ -85,7 +85,7 @@ export default function Dashboard() {
           </div>
 
           {/* 今月の収支・明日の予想・支払い予定 */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <div className={`card border-l-4 ${monthPL !== null && monthPL >= 0 ? 'border-green-500' : 'border-red-500'}`}>
               <div className="card-header flex items-center gap-1">
                 {monthPL !== null && monthPL >= 0 ? <TrendingUp size={12}/> : <TrendingDown size={12}/>} 今月の収支（実質）

@@ -111,7 +111,7 @@ export const setQuick = (withdraws: LineItem[], id: string, category: ExpenseCat
 
 // カテゴリ別のデフォルト候補（履歴が空でも最初から選べるように）
 export const DEFAULT_ITEM_LABELS: Record<ExpenseCategory, string[]> = {
-  ingredient: ['肉のハナマサ', '鰻代', 'タレ代', '山椒代', '吉野家', 'コンビニ'],
+  ingredient: ['鰻代', 'タレ代', '山椒代', 'お米', '日本酒', '野菜', '調味料', '肉のハナマサ', '吉野家', 'コンビニ'],
   supplies: ['シモジマ', 'スギ薬局', 'コンビニ'],
   labor: [],
   rent: ['家賃'],

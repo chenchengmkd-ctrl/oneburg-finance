@@ -83,7 +83,7 @@ export default function Payments() {
   }
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-4 sm:p-6 max-w-5xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800">資金繰り予定</h1>
         <p className="text-gray-400 text-sm mt-1">収入・支出の予定をまとめて登録し、いつ・どのくらい資金が足りなくなるかを自動で見える化します</p>
@@ -91,7 +91,7 @@ export default function Payments() {
 
       {/* 資金ショート予測 */}
       <p className="section-header">資金ショート予測</p>
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <ShortfallCard title="今後7日間" income={cf7.income} expense={cf7.expense} net={cf7.net}
           sub={latest ? `現在の実質総資産 ${fmt(latest.realBal)} ＋ この差額 = ${fmt(latest.realBal + cf7.net)}` : undefined} />
         <ShortfallCard title="今後30日間" income={cf30.income} expense={cf30.expense} net={cf30.net}
@@ -136,7 +136,7 @@ export default function Payments() {
 
       {/* 借入・立替金 */}
       <p className="section-header">借入・立替金</p>
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         {loans.map(loan => {
           const remaining = Math.max(0, loan.totalAmount - loan.paidAmount)
           const linkedPayment = payments.find(p => p.linkedLoanId === loan.id)

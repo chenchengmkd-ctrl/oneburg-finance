@@ -15,6 +15,19 @@ export interface PLLedgerRow {
   category: ExpenseCategory
 }
 
+export interface PLLabelBreakdownItem {
+  label: string
+  amount: number
+  count: number
+}
+
+export interface PLLabelBreakdown {
+  category: ExpenseCategory
+  categoryLabel: string
+  total: number
+  items: PLLabelBreakdownItem[]  // 金額の大きい順
+}
+
 export interface PLResult {
   month: string
   cashSales: number       // 現金売上
@@ -25,6 +38,7 @@ export interface PLResult {
   expenseTotal: number    // 支出合計
   profit: number          // 損益 = 収入合計 − 支出合計
   ledger: PLLedgerRow[]   // 全引出明細（日付順）
+  labelBreakdown: PLLabelBreakdown[]  // カテゴリ×項目名別の内訳（「肉のハナマサ」ではなく「日本酒」「お米」等、実際に何にコストをかけたか把握する用）
   daysWithData: number
 }
 
@@ -96,10 +110,29 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
   const revenueTotal = cashSales + corpDeposit + persDeposit
   const expenseTotal = Object.values(expenseMap).reduce((s, v) => s + v, 0)
 
+  const labelBreakdown = calcLabelBreakdown(ledger)
+
   return {
     month, cashSales, corpDeposit, persDeposit, revenueTotal,
     expenseByCategory, expenseTotal, profit: revenueTotal - expenseTotal,
     ledger: ledger.sort((a, b) => a.date.localeCompare(b.date)),
+    labelBreakdown,
     daysWithData: dates.length,
   }
+}
+
+// 引出明細をカテゴリ×項目名で集計する（同じ項目名は合算・件数もカウント。金額の大きい順）
+const calcLabelBreakdown = (ledger: PLLedgerRow[]): PLLabelBreakdown[] => {
+  const categories = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
+  return categories.map(category => {
+    const byLabel = new Map<string, PLLabelBreakdownItem>()
+    for (const row of ledger) {
+      if (row.category !== category) continue
+      const existing = byLabel.get(row.label)
+      if (existing) { existing.amount += row.amount; existing.count += 1 }
+      else byLabel.set(row.label, { label: row.label, amount: row.amount, count: 1 })
+    }
+    const items = [...byLabel.values()].sort((a, b) => b.amount - a.amount)
+    return { category, categoryLabel: EXPENSE_CATEGORY_LABEL[category], total: items.reduce((s, i) => s + i.amount, 0), items }
+  })
 }
