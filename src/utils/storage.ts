@@ -69,7 +69,7 @@ export const defaultReport = (date: string, pending?: ReportPending): BalanceRep
   note: ''
 })
 
-export const newLineItem = (category?: ExpenseCategory): LineItem => ({ id: newItemId(), label: '', amount: 0, category })
+export const newLineItem = (category?: ExpenseCategory, vendor?: string): LineItem => ({ id: newItemId(), label: '', amount: 0, category, vendor })
 
 export const sumItems = (items: LineItem[]) => items.reduce((s, i) => s + i.amount, 0)
 
@@ -109,9 +109,9 @@ export const setQuick = (withdraws: LineItem[], id: string, category: ExpenseCat
   return amount > 0 ? [...rest, { id, label, amount, category }] : rest
 }
 
-// カテゴリ別のデフォルト候補（履歴が空でも最初から選べるように）
+// カテゴリ別の品目名（中区分）デフォルト候補（履歴が空でも最初から選べるように）
 export const DEFAULT_ITEM_LABELS: Record<ExpenseCategory, string[]> = {
-  ingredient: ['鰻代', 'タレ代', '山椒代', 'お米', '日本酒', '野菜', '調味料', '肉のハナマサ', '吉野家', 'コンビニ'],
+  ingredient: ['鰻代', 'タレ代', '山椒代', 'お米', '日本酒', '野菜', '調味料', '吉野家', 'コンビニ'],
   supplies: ['シモジマ', 'スギ薬局', 'コンビニ'],
   labor: [],
   rent: ['家賃'],
@@ -119,7 +119,17 @@ export const DEFAULT_ITEM_LABELS: Record<ExpenseCategory, string[]> = {
   other: ['ATM手数料', 'UQモバイル', 'GOOGLE', 'AMAZON', 'CLAUDE'],
 }
 
-// 指定カテゴリの入力候補（デフォルト候補＋過去に実際に使った項目名。入力時の選択候補用）
+// カテゴリ別の仕入れ先（大区分）デフォルト候補
+export const DEFAULT_VENDOR_LABELS: Record<ExpenseCategory, string[]> = {
+  ingredient: ['肉のハナマサ'],
+  supplies: ['シモジマ', 'Amazon', 'コーナン', 'ダイソー'],
+  labor: [],
+  rent: [],
+  utility: [],
+  other: [],
+}
+
+// 指定カテゴリの品目名入力候補（デフォルト候補＋過去に実際に使った品目名。入力時の選択候補用）
 export const usedLabels = (reports: Record<string, BalanceReport>, category: ExpenseCategory): string[] => {
   const seen = new Set(DEFAULT_ITEM_LABELS[category])
   const extra: string[] = []
@@ -132,6 +142,21 @@ export const usedLabels = (reports: Record<string, BalanceReport>, category: Exp
     }
   }
   return [...DEFAULT_ITEM_LABELS[category], ...extra]
+}
+
+// 指定カテゴリの仕入れ先入力候補（デフォルト候補＋過去に実際に使った仕入れ先名）
+export const usedVendors = (reports: Record<string, BalanceReport>, category: ExpenseCategory): string[] => {
+  const seen = new Set(DEFAULT_VENDOR_LABELS[category])
+  const extra: string[] = []
+  for (const r of Object.values(reports)) {
+    for (const bucket of [r.pers, r.corp, r.cash]) {
+      for (const w of bucket.withdraws) {
+        const vendor = (w.vendor ?? '').trim()
+        if (w.category === category && vendor && !seen.has(vendor)) { seen.add(vendor); extra.push(vendor) }
+      }
+    }
+  }
+  return [...DEFAULT_VENDOR_LABELS[category], ...extra]
 }
 
 // 出勤シフトの合計を人件費(quick-labor)へ自動同期した報告を返す

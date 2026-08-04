@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { defaultReport, newShiftEntry, newLineItem, sumItems, sumShiftPay, shiftPay, calcShiftHours, usedLabels, applyShiftsToReport } from '../../utils/storage'
+import { defaultReport, newShiftEntry, newLineItem, sumItems, sumShiftPay, shiftPay, calcShiftHours, usedLabels, usedVendors, applyShiftsToReport } from '../../utils/storage'
 import { calcPL } from '../../utils/plCalc'
 import { fmt, fmtShort, fmtHours, getDayOfWeek, isWeekend } from '../../utils/calculations'
 import type { BalanceReport, ExpenseCategory, LineItem, ShiftEntry } from '../../types'
@@ -21,16 +21,42 @@ function BigInput({ label, value, onChange, color }: {
   )
 }
 
-// 食材・備品などの仕入れ：複数明細＋過去に使った項目名を選択肢として提示
-function QuickItemsCard({ title, color, category, items, labelOptions, onChange, hint }: {
+// 食材・備品などの仕入れ：仕入れ先（大区分）＞品目（中区分）＞金額（小区分）の3階層で入力
+// 仕入れ先を設定しない行はグループ化せずフラットに表示（従来通りのシンプル入力も引き続き可能）
+function QuickItemsCard({ title, color, category, items, labelOptions, vendorOptions, onChange, hint }: {
   title: string; color: string; category: ExpenseCategory
-  items: LineItem[]; labelOptions: string[]; onChange: (items: LineItem[]) => void; hint?: string
+  items: LineItem[]; labelOptions: string[]; vendorOptions: string[]; onChange: (items: LineItem[]) => void; hint?: string
 }) {
   const total = sumItems(items)
-  const listId = `quick-labels-${category}`
+  const itemListId = `quick-items-${category}`
+  const vendorListId = `quick-vendors-${category}`
   const update = (id: string, patch: Partial<LineItem>) => onChange(items.map(i => i.id === id ? { ...i, ...patch } : i))
   const remove = (id: string) => onChange(items.filter(i => i.id !== id))
-  const add = () => onChange([...items, newLineItem(category)])
+  const addFlat = () => onChange([...items, newLineItem(category)])
+  const addVendorGroup = () => onChange([...items, newLineItem(category, '')])
+  const addToVendor = (vendor: string) => onChange([...items, newLineItem(category, vendor)])
+  const renameVendor = (oldVendor: string, newVendor: string) =>
+    onChange(items.map(i => (i.vendor ?? '') === oldVendor ? { ...i, vendor: newVendor } : i))
+
+  const flatItems = items.filter(i => i.vendor === undefined)
+  const vendorOrder: string[] = []
+  const byVendor = new Map<string, LineItem[]>()
+  for (const item of items) {
+    if (item.vendor === undefined) continue
+    if (!byVendor.has(item.vendor)) { byVendor.set(item.vendor, []); vendorOrder.push(item.vendor) }
+    byVendor.get(item.vendor)!.push(item)
+  }
+
+  const ItemRow = ({ item }: { item: LineItem }) => (
+    <div className="flex items-center gap-2">
+      <input type="text" list={itemListId} value={item.label} onChange={e => update(item.id, { label: e.target.value })}
+        placeholder="品目名（例：日本酒）"
+        className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
+      <NumberInput value={item.amount} onChange={v => update(item.id, { amount: v })}
+        className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
+      <button onClick={() => remove(item.id)} className="text-gray-300 hover:text-red-500 shrink-0"><X size={14}/></button>
+    </div>
+  )
 
   return (
     <div className="card mb-6">
@@ -39,25 +65,53 @@ function QuickItemsCard({ title, color, category, items, labelOptions, onChange,
         <span className={`text-lg font-black ${color}`}>{fmt(total)}</span>
       </div>
       {hint && <p className="text-[11px] text-gray-400 mb-2">{hint}</p>}
-      <datalist id={listId}>
+      <datalist id={itemListId}>
         {labelOptions.map(l => <option key={l} value={l}/>)}
       </datalist>
-      <div className="space-y-2">
-        {items.map(item => (
-          <div key={item.id} className="flex items-center gap-2">
-            <input type="text" list={listId} value={item.label} onChange={e => update(item.id, { label: e.target.value })}
-              placeholder="項目名（仕入れ先・品目など）"
-              className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
-            <NumberInput value={item.amount} onChange={v => update(item.id, { amount: v })}
-              className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
-            <button onClick={() => remove(item.id)} className="text-gray-300 hover:text-red-500 shrink-0"><X size={14}/></button>
-          </div>
-        ))}
-        {items.length === 0 && <div className="text-xs text-gray-300">なし</div>}
+      <datalist id={vendorListId}>
+        {vendorOptions.map(v => <option key={v} value={v}/>)}
+      </datalist>
+
+      {flatItems.length > 0 && (
+        <div className="space-y-2 mb-2">
+          {flatItems.map(item => <ItemRow key={item.id} item={item}/>)}
+        </div>
+      )}
+
+      {vendorOrder.length > 0 && (
+        <div className="space-y-2 mb-2">
+          {vendorOrder.map(vendor => {
+            const groupItems = byVendor.get(vendor)!
+            return (
+              <div key={vendor} className="border border-gray-100 rounded-lg p-2 bg-gray-50">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <input type="text" list={vendorListId} value={vendor} onChange={e => renameVendor(vendor, e.target.value)}
+                    placeholder="仕入れ先名（例：肉のハナマサ）"
+                    className="text-sm font-bold text-gray-700 bg-transparent border-b border-dashed border-gray-300 focus:outline-none focus:border-gray-500 flex-1"/>
+                  <span className="text-xs font-black text-gray-500 shrink-0">{fmt(sumItems(groupItems))}</span>
+                </div>
+                <div className="space-y-1.5 pl-2">
+                  {groupItems.map(item => <ItemRow key={item.id} item={item}/>)}
+                </div>
+                <button onClick={() => addToVendor(vendor)} className="text-[11px] text-gray-500 mt-1.5 pl-2 flex items-center gap-1 hover:text-gray-700">
+                  <Plus size={10}/> 品目を追加
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {flatItems.length === 0 && vendorOrder.length === 0 && <div className="text-xs text-gray-300 mb-2">なし</div>}
+
+      <div className="flex items-center gap-4">
+        <button onClick={addFlat} className="text-xs text-gray-600 flex items-center gap-1 hover:text-gray-800">
+          <Plus size={12}/> 品目を追加
+        </button>
+        <button onClick={addVendorGroup} className="text-xs text-gray-600 flex items-center gap-1 hover:text-gray-800">
+          <Plus size={12}/> 仕入れ先を追加
+        </button>
       </div>
-      <button onClick={add} className="text-xs text-gray-600 mt-2 flex items-center gap-1 hover:text-gray-800">
-        <Plus size={12}/> 行を追加
-      </button>
     </div>
   )
 }
@@ -87,6 +141,9 @@ export default function DailyEntry() {
   const ingredientLabels = useMemo(() => usedLabels(reports, 'ingredient'), [reports])
   const suppliesLabels = useMemo(() => usedLabels(reports, 'supplies'), [reports])
   const otherLabels = useMemo(() => usedLabels(reports, 'other'), [reports])
+  const ingredientVendors = useMemo(() => usedVendors(reports, 'ingredient'), [reports])
+  const suppliesVendors = useMemo(() => usedVendors(reports, 'supplies'), [reports])
+  const otherVendors = useMemo(() => usedVendors(reports, 'other'), [reports])
 
   const changeDate = (delta: number) => {
     const d = new Date(selectedDate)
@@ -246,10 +303,10 @@ export default function DailyEntry() {
       </div>
 
       <QuickItemsCard title="仕入れ（食材）" color="text-red-700" category="ingredient"
-        items={ingredientItems} labelOptions={ingredientLabels} onChange={items => updateCategoryItems('ingredient', items)}
-        hint="同じ店で複数買った場合は行を分けて「日本酒」「お米」のように入力すると、損益表で品目別に見られます"/>
+        items={ingredientItems} labelOptions={ingredientLabels} vendorOptions={ingredientVendors} onChange={items => updateCategoryItems('ingredient', items)}
+        hint="「仕入れ先を追加」で肉のハナマサ等をまとめ、その中に日本酒・お米など品目ごとの金額を入れると、損益表で細かく見られます"/>
       <QuickItemsCard title="仕入れ（備品）" color="text-orange-700" category="supplies"
-        items={suppliesItems} labelOptions={suppliesLabels} onChange={items => updateCategoryItems('supplies', items)}/>
+        items={suppliesItems} labelOptions={suppliesLabels} vendorOptions={suppliesVendors} onChange={items => updateCategoryItems('supplies', items)}/>
 
       <div className="flex items-center justify-between px-1 mb-6 -mt-3">
         <span className="text-xs font-bold text-gray-500">仕入れ合計（食材＋備品）</span>
@@ -257,7 +314,7 @@ export default function DailyEntry() {
       </div>
 
       <QuickItemsCard title="その他経費（家賃・光熱費・ATM手数料など）" color="text-gray-600" category="other"
-        items={otherItems} labelOptions={otherLabels} onChange={items => updateCategoryItems('other', items)}/>
+        items={otherItems} labelOptions={otherLabels} vendorOptions={otherVendors} onChange={items => updateCategoryItems('other', items)}/>
 
       {showBulkImport && <ShiftBulkImportModal onClose={() => setShowBulkImport(false)}/>}
       </>

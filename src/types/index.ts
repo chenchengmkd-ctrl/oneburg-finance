@@ -55,6 +55,7 @@ export interface LineItem {
   label: string
   amount: number
   category?: ExpenseCategory   // 引出のみ使用。未設定は'other'扱い
+  vendor?: string              // 仕入れ先（大区分）。未設定＝仕入れ先グループなしのフラット項目として扱う
 }
 
 // 残高報告：口座バケット（GMO個人・GMO法人）

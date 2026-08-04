@@ -48,8 +48,8 @@ export default function PL() {
   }
 
   const exportLedgerCsv = () => {
-    const header = ['日付', '口座', '分類', '内容', '金額']
-    const rows = pl.ledger.map(row => [row.date, PL_BUCKET_LABEL[row.bucket], pl.expenseByCategory.find(e => e.category === row.category)?.label ?? row.category, row.label, row.amount])
+    const header = ['日付', '口座', '分類', '仕入れ先', '内容', '金額']
+    const rows = pl.ledger.map(row => [row.date, PL_BUCKET_LABEL[row.bucket], pl.expenseByCategory.find(e => e.category === row.category)?.label ?? row.category, row.vendor, row.label, row.amount])
     downloadCsv(`損益表_支出明細_${month}.csv`, [header, ...rows])
   }
 
@@ -247,6 +247,7 @@ export default function PL() {
                     <th className="text-left py-2 pr-3">日付</th>
                     <th className="text-left pr-3">口座</th>
                     <th className="text-left pr-3">分類</th>
+                    <th className="text-left pr-3">仕入れ先</th>
                     <th className="text-left pr-3">内容</th>
                     <th className="text-right">金額</th>
                   </tr>
@@ -261,6 +262,7 @@ export default function PL() {
                           {pl.expenseByCategory.find(e => e.category === row.category)?.label}
                         </span>
                       </td>
+                      <td className="pr-3 text-gray-400">{row.vendor || '-'}</td>
                       <td className="pr-3 text-gray-700">{row.label}</td>
                       <td className="text-right font-bold text-gray-700">{fmtShort(row.amount)}</td>
                     </tr>

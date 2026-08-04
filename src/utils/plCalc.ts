@@ -11,6 +11,7 @@ export interface PLLedgerRow {
   date: string
   bucket: 'corp' | 'pers' | 'cash'
   label: string
+  vendor: string
   amount: number
   category: ExpenseCategory
 }
@@ -99,7 +100,7 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
       for (const item of day.withdraws) {
         const cat = item.category ?? 'other'
         expenseMap[cat] += item.amount
-        ledger.push({ date, bucket, label: item.label || '（無題）', amount: item.amount, category: cat })
+        ledger.push({ date, bucket, label: item.label || '（無題）', vendor: item.vendor ?? '', amount: item.amount, category: cat })
       }
     }
   }
