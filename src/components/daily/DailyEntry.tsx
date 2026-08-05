@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import { defaultReport, newShiftEntry, newLineItem, sumItems, sumShiftPay, shiftPay, calcShiftHours, usedLabels, usedVendors, applyShiftsToReport } from '../../utils/storage'
 import { calcPL } from '../../utils/plCalc'
@@ -22,23 +22,58 @@ function BigInput({ label, value, onChange, color }: {
 }
 
 // 選択肢がほぼ固まっている項目向け：普段はプルダウン選択、リストにないものだけ「＋ 新規入力」でその場で自由入力に切り替え
+// 自由入力中は日本語入力（IME）の変換途中で親の再描画に巻き込まれないよう、ローカルのdraftを表示に使い確定後に親へ伝える
 function PickField({ value, options, placeholder, addLabel, onChange, className }: {
   value: string; options: string[]; placeholder: string; addLabel: string; onChange: (v: string) => void; className: string
 }) {
   const [customMode, setCustomMode] = useState(() => value !== '' && !options.includes(value))
+  const [draft, setDraft] = useState(value)
+  const composing = useRef(false)
+
+  useEffect(() => { if (!composing.current) setDraft(value) }, [value])
 
   if (customMode) {
-    return <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className={className} autoFocus/>
+    return (
+      <input type="text" value={draft} placeholder={placeholder} className={className} autoFocus
+        onChange={e => {
+          setDraft(e.target.value)
+          if (!composing.current) onChange(e.target.value)
+        }}
+        onCompositionStart={() => { composing.current = true }}
+        onCompositionEnd={e => {
+          composing.current = false
+          const v = (e.target as HTMLInputElement).value
+          setDraft(v)
+          onChange(v)
+        }}/>
+    )
   }
   return (
     <select value={value} onChange={e => {
-      if (e.target.value === '__custom__') setCustomMode(true)
+      if (e.target.value === '__custom__') { setDraft(''); setCustomMode(true) }
       else onChange(e.target.value)
     }} className={className}>
       <option value="">{placeholder}</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
       <option value="__custom__">{addLabel}</option>
     </select>
+  )
+}
+
+// 品目1行（品目名＋金額）。QuickItemsCardの外に置くことで、入力のたびに作り直されてフォーカスが外れるのを防ぐ
+function ItemRow({ item, labelOptions, onUpdate, onRemove }: {
+  item: LineItem; labelOptions: string[]
+  onUpdate: (patch: Partial<LineItem>) => void; onRemove: () => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <PickField value={item.label} options={labelOptions} placeholder="品目を選択" addLabel="＋ 新しい品目を入力"
+        onChange={v => onUpdate({ label: v })}
+        className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-white"/>
+      <NumberInput value={item.amount} onChange={v => onUpdate({ amount: v })}
+        className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
+      <button onClick={onRemove} className="text-gray-300 hover:text-red-500 shrink-0"><X size={14}/></button>
+    </div>
   )
 }
 
@@ -54,8 +89,9 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
   const addFlat = () => onChange([...items, newLineItem(category)])
   const addVendorGroup = () => onChange([...items, newLineItem(category, '')])
   const addToVendor = (vendor: string) => onChange([...items, newLineItem(category, vendor)])
+  // vendor未設定（＝仕入れ先グループに属さない単独の品目）は対象外。`?? ''`で比較すると空名グループに巻き込まれる
   const renameVendor = (oldVendor: string, newVendor: string) =>
-    onChange(items.map(i => (i.vendor ?? '') === oldVendor ? { ...i, vendor: newVendor } : i))
+    onChange(items.map(i => i.vendor !== undefined && i.vendor === oldVendor ? { ...i, vendor: newVendor } : i))
 
   const flatItems = items.filter(i => i.vendor === undefined)
   const vendorOrder: string[] = []
@@ -66,15 +102,9 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
     byVendor.get(item.vendor)!.push(item)
   }
 
-  const ItemRow = ({ item }: { item: LineItem }) => (
-    <div className="flex items-center gap-2">
-      <PickField value={item.label} options={labelOptions} placeholder="品目を選択" addLabel="＋ 新しい品目を入力"
-        onChange={v => update(item.id, { label: v })}
-        className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-white"/>
-      <NumberInput value={item.amount} onChange={v => update(item.id, { amount: v })}
-        className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
-      <button onClick={() => remove(item.id)} className="text-gray-300 hover:text-red-500 shrink-0"><X size={14}/></button>
-    </div>
+  const row = (item: LineItem) => (
+    <ItemRow key={item.id} item={item} labelOptions={labelOptions}
+      onUpdate={patch => update(item.id, patch)} onRemove={() => remove(item.id)}/>
   )
 
   return (
@@ -87,7 +117,7 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
 
       {flatItems.length > 0 && (
         <div className="space-y-2 mb-2">
-          {flatItems.map(item => <ItemRow key={item.id} item={item}/>)}
+          {flatItems.map(row)}
         </div>
       )}
 
@@ -96,7 +126,8 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
           {vendorOrder.map(vendor => {
             const groupItems = byVendor.get(vendor)!
             return (
-              <div key={vendor} className="border border-gray-100 rounded-lg p-2 bg-gray-50">
+              // 仕入れ先名を打ち替えても行が作り直されないよう、キーには名前ではなく先頭の明細IDを使う
+              <div key={groupItems[0].id} className="border border-gray-100 rounded-lg p-2 bg-gray-50">
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <PickField value={vendor} options={vendorOptions} placeholder="仕入れ先を選択" addLabel="＋ 新しい仕入れ先を入力"
                     onChange={v => renameVendor(vendor, v)}
@@ -104,7 +135,7 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
                   <span className="text-xs font-black text-gray-500 shrink-0">{fmt(sumItems(groupItems))}</span>
                 </div>
                 <div className="space-y-1.5 pl-2">
-                  {groupItems.map(item => <ItemRow key={item.id} item={item}/>)}
+                  {groupItems.map(row)}
                 </div>
                 <button onClick={() => addToVendor(vendor)} className="text-[11px] text-gray-500 mt-1.5 pl-2 flex items-center gap-1 hover:text-gray-700">
                   <Plus size={10}/> 品目を追加
