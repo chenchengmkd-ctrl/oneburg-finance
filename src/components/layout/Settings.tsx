@@ -3,7 +3,7 @@ import { useAppStore } from '../../stores/appStore'
 import { storage } from '../../utils/storage'
 import { supabase } from '../../utils/supabaseClient'
 import { EXPENSE_CATEGORY_LABEL, DEFAULT_TAX_RATE } from '../../types'
-import type { ExpenseCategory, ItemLabelSet, LabelDef, TaxRate } from '../../types'
+import type { ExpenseCategory, LabelDef, TaxRate } from '../../types'
 import NumberInput from '../common/NumberInput'
 import { Plus, Trash2, UploadCloud } from 'lucide-react'
 
