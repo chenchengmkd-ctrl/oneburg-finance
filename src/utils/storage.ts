@@ -1,4 +1,4 @@
-import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff } from '../types'
+import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet } from '../types'
 import { supabase } from './supabaseClient'
 
 const PREFIX = 'birdmen:'
@@ -129,9 +129,15 @@ export const DEFAULT_VENDOR_LABELS: Record<ExpenseCategory, string[]> = {
   other: [],
 }
 
-// 指定カテゴリの品目名入力候補（デフォルト候補＋過去に実際に使った品目名。入力時の選択候補用）
-export const usedLabels = (reports: Record<string, BalanceReport>, category: ExpenseCategory): string[] => {
-  const seen = new Set(DEFAULT_ITEM_LABELS[category])
+// 設定画面で編集する品目・仕入れ先マスタの初期値（履歴・コード内デフォルトを合わせたもの）
+export const defaultItemLabelSet = (): ItemLabelSet => ({
+  vendors: { ingredient: [...DEFAULT_VENDOR_LABELS.ingredient], supplies: [...DEFAULT_VENDOR_LABELS.supplies], labor: [], rent: [], utility: [], other: [...DEFAULT_VENDOR_LABELS.other] },
+  items: { ingredient: [...DEFAULT_ITEM_LABELS.ingredient], supplies: [...DEFAULT_ITEM_LABELS.supplies], labor: [], rent: [...DEFAULT_ITEM_LABELS.rent], utility: [...DEFAULT_ITEM_LABELS.utility], other: [...DEFAULT_ITEM_LABELS.other] },
+})
+
+// 指定カテゴリの品目名入力候補（マスタ登録分＋過去に実際に使った品目名。入力時の選択候補用）
+export const usedLabels = (reports: Record<string, BalanceReport>, category: ExpenseCategory, master: string[] = DEFAULT_ITEM_LABELS[category]): string[] => {
+  const seen = new Set(master)
   const extra: string[] = []
   for (const r of Object.values(reports)) {
     for (const bucket of [r.pers, r.corp, r.cash]) {
@@ -141,12 +147,12 @@ export const usedLabels = (reports: Record<string, BalanceReport>, category: Exp
       }
     }
   }
-  return [...DEFAULT_ITEM_LABELS[category], ...extra]
+  return [...master, ...extra]
 }
 
-// 指定カテゴリの仕入れ先入力候補（デフォルト候補＋過去に実際に使った仕入れ先名）
-export const usedVendors = (reports: Record<string, BalanceReport>, category: ExpenseCategory): string[] => {
-  const seen = new Set(DEFAULT_VENDOR_LABELS[category])
+// 指定カテゴリの仕入れ先入力候補（マスタ登録分＋過去に実際に使った仕入れ先名）
+export const usedVendors = (reports: Record<string, BalanceReport>, category: ExpenseCategory, master: string[] = DEFAULT_VENDOR_LABELS[category]): string[] => {
+  const seen = new Set(master)
   const extra: string[] = []
   for (const r of Object.values(reports)) {
     for (const bucket of [r.pers, r.corp, r.cash]) {
@@ -156,7 +162,7 @@ export const usedVendors = (reports: Record<string, BalanceReport>, category: Ex
       }
     }
   }
-  return [...DEFAULT_VENDOR_LABELS[category], ...extra]
+  return [...master, ...extra]
 }
 
 // 出勤シフトの合計を人件費(quick-labor)へ自動同期した報告を返す

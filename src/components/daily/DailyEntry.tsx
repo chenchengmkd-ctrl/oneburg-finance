@@ -130,11 +130,11 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
 }
 
 export default function DailyEntry() {
-  const { reports, staff, loadReports, loadStaff, saveReport, loadSettings, selectedDate, setSelectedDate, setPage } = useAppStore()
+  const { reports, staff, itemLabels, loadReports, loadStaff, loadItemLabels, saveReport, loadSettings, selectedDate, setSelectedDate, setPage } = useAppStore()
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [viewMode, setViewMode] = useState<'input' | 'list'>('input')
 
-  useEffect(() => { loadReports(); loadStaff(); loadSettings() }, [])
+  useEffect(() => { loadReports(); loadStaff(); loadSettings(); loadItemLabels() }, [])
 
   const report: BalanceReport = reports[selectedDate] ?? defaultReport(selectedDate)
   const month = selectedDate.slice(0, 7)
@@ -151,12 +151,12 @@ export default function DailyEntry() {
   const profit = sales - labor - ingredient - supplies - other
 
   const monthPL = useMemo(() => calcPL(reports, month), [reports, month])
-  const ingredientLabels = useMemo(() => usedLabels(reports, 'ingredient'), [reports])
-  const suppliesLabels = useMemo(() => usedLabels(reports, 'supplies'), [reports])
-  const otherLabels = useMemo(() => usedLabels(reports, 'other'), [reports])
-  const ingredientVendors = useMemo(() => usedVendors(reports, 'ingredient'), [reports])
-  const suppliesVendors = useMemo(() => usedVendors(reports, 'supplies'), [reports])
-  const otherVendors = useMemo(() => usedVendors(reports, 'other'), [reports])
+  const ingredientLabels = useMemo(() => usedLabels(reports, 'ingredient', itemLabels.items.ingredient), [reports, itemLabels])
+  const suppliesLabels = useMemo(() => usedLabels(reports, 'supplies', itemLabels.items.supplies), [reports, itemLabels])
+  const otherLabels = useMemo(() => usedLabels(reports, 'other', itemLabels.items.other), [reports, itemLabels])
+  const ingredientVendors = useMemo(() => usedVendors(reports, 'ingredient', itemLabels.vendors.ingredient), [reports, itemLabels])
+  const suppliesVendors = useMemo(() => usedVendors(reports, 'supplies', itemLabels.vendors.supplies), [reports, itemLabels])
+  const otherVendors = useMemo(() => usedVendors(reports, 'other', itemLabels.vendors.other), [reports, itemLabels])
 
   const changeDate = (delta: number) => {
     const d = new Date(selectedDate)

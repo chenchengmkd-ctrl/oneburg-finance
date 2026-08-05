@@ -40,6 +40,12 @@ export interface ScheduledPayment {
 // 支出の分類（損益表の費用内訳に使う。引出明細に付ける。収入側では未使用）
 export type ExpenseCategory = 'ingredient' | 'supplies' | 'labor' | 'rent' | 'utility' | 'other'
 
+// 仕入れ先・品目の候補マスタ（カテゴリ別。設定画面で編集可能）
+export interface ItemLabelSet {
+  vendors: Record<ExpenseCategory, string[]>
+  items: Record<ExpenseCategory, string[]>
+}
+
 export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
   ingredient: '食品仕入',
   supplies:   '備品仕入',

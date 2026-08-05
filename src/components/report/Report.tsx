@@ -3,7 +3,7 @@ import { useAppStore } from '../../stores/appStore'
 import { defaultReport, newLineItem, sumItems, usedLabels } from '../../utils/storage'
 import { buildReportSeries, latestPendingBefore, buildReportText } from '../../utils/reportCalc'
 import { fmt, fmtShort, getDayOfWeek, isWeekend } from '../../utils/calculations'
-import type { BalanceReport, LineItem, ExpenseCategory } from '../../types'
+import type { BalanceReport, LineItem, ExpenseCategory, ItemLabelSet } from '../../types'
 import { EXPENSE_CATEGORY_LABEL } from '../../types'
 import { ChevronLeft, ChevronRight, Copy, Check, User, Building2, Coins, List, Pencil, Plus, X } from 'lucide-react'
 import ReportList from './ReportList'
@@ -23,9 +23,9 @@ function NInput({ label, value, onChange, ring, hint }: {
 }
 
 // 入金・引出の複数明細入力（行の追加・削除、合計を自動表示）
-function LineItemsEditor({ label, items, onChange, ring, withCategory, idPrefix, reports }: {
+function LineItemsEditor({ label, items, onChange, ring, withCategory, idPrefix, reports, itemLabels }: {
   label: string; items: LineItem[]; onChange: (items: LineItem[]) => void; ring: string; withCategory?: boolean
-  idPrefix?: string; reports?: Record<string, BalanceReport>
+  idPrefix?: string; reports?: Record<string, BalanceReport>; itemLabels?: ItemLabelSet
 }) {
   const total = sumItems(items)
   const update = (id: string, patch: Partial<LineItem>) => onChange(items.map(i => i.id === id ? { ...i, ...patch } : i))
@@ -39,9 +39,9 @@ function LineItemsEditor({ label, items, onChange, ring, withCategory, idPrefix,
         <label className="text-xs text-gray-500">{label}</label>
         <span className="text-xs font-bold text-gray-600">合計 {fmtShort(total)}</span>
       </div>
-      {withCategory && reports && categories.map(cat => (
+      {withCategory && reports && itemLabels && categories.map(cat => (
         <datalist key={cat} id={`${idPrefix}-labels-${cat}`}>
-          {usedLabels(reports, cat).map(l => <option key={l} value={l}/>)}
+          {usedLabels(reports, cat, itemLabels.items[cat]).map(l => <option key={l} value={l}/>)}
         </datalist>
       ))}
       <div className="space-y-1">
@@ -105,11 +105,11 @@ function OverrideInput({ label, autoValue, override, onChange, ring }: {
 }
 
 export default function Report() {
-  const { reports, loadReports, saveReport, selectedDate, setSelectedDate } = useAppStore()
+  const { reports, itemLabels, loadReports, loadItemLabels, saveReport, selectedDate, setSelectedDate } = useAppStore()
   const [copied, setCopied] = useState(false)
   const [viewMode, setViewMode] = useState<'input' | 'list'>('input')
 
-  useEffect(() => { loadReports() }, [])
+  useEffect(() => { loadReports(); loadItemLabels() }, [])
 
   const report: BalanceReport = reports[selectedDate]
     ?? defaultReport(selectedDate, latestPendingBefore(reports, selectedDate))
@@ -199,7 +199,7 @@ export default function Report() {
                 onChange={v => savePers({ prevOverride: v })} ring="focus:ring-green-400"/>
               <NInput label="入金予定" value={report.pending.persExpected} onChange={v => savePending({ persExpected: v })} ring="focus:ring-green-400"/>
               <LineItemsEditor label="入金" items={report.pers.deposits} onChange={items => savePers({ deposits: items })} ring="focus:ring-green-400"/>
-              <LineItemsEditor label="引出" items={report.pers.withdraws} onChange={items => savePers({ withdraws: items })} ring="focus:ring-green-400" withCategory idPrefix="pers-w" reports={reports}/>
+              <LineItemsEditor label="引出" items={report.pers.withdraws} onChange={items => savePers({ withdraws: items })} ring="focus:ring-green-400" withCategory idPrefix="pers-w" reports={reports} itemLabels={itemLabels}/>
               <OverrideInput label="残高目安（実測補正）" autoValue={day.persBal} override={report.pers.balanceOverride}
                 onChange={v => savePers({ balanceOverride: v })} ring="focus:ring-green-400"/>
             </div>
@@ -217,7 +217,7 @@ export default function Report() {
               <OverrideInput label="残高目安（実測補正）" autoValue={day.corpBal} override={report.corp.balanceOverride}
                 onChange={v => saveCorp({ balanceOverride: v })} ring="focus:ring-blue-400"/>
               <LineItemsEditor label="入金（現金からの銀行入金は自動加算）" items={report.corp.deposits} onChange={items => saveCorp({ deposits: items })} ring="focus:ring-blue-400"/>
-              <LineItemsEditor label="引出" items={report.corp.withdraws} onChange={items => saveCorp({ withdraws: items })} ring="focus:ring-blue-400" withCategory idPrefix="corp-w" reports={reports}/>
+              <LineItemsEditor label="引出" items={report.corp.withdraws} onChange={items => saveCorp({ withdraws: items })} ring="focus:ring-blue-400" withCategory idPrefix="corp-w" reports={reports} itemLabels={itemLabels}/>
             </div>
           </div>
 
@@ -234,7 +234,7 @@ export default function Report() {
               <NInput label="今後返却予定" value={report.pending.cashReturn} onChange={v => savePending({ cashReturn: v })} ring="focus:ring-amber-400"/>
               <OverrideInput label="残高目安（実測補正）" autoValue={day.cashBal} override={report.cash.balanceOverride}
                 onChange={v => saveCash({ balanceOverride: v })} ring="focus:ring-amber-400"/>
-              <LineItemsEditor label="手渡し・現金払い（内訳）" items={report.cash.withdraws} onChange={items => saveCash({ withdraws: items })} ring="focus:ring-amber-400" withCategory idPrefix="cash-w" reports={reports}/>
+              <LineItemsEditor label="手渡し・現金払い（内訳）" items={report.cash.withdraws} onChange={items => saveCash({ withdraws: items })} ring="focus:ring-amber-400" withCategory idPrefix="cash-w" reports={reports} itemLabels={itemLabels}/>
             </div>
           </div>
 
