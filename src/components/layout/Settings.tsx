@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import { storage } from '../../utils/storage'
 import { supabase } from '../../utils/supabaseClient'
-import { EXPENSE_CATEGORY_LABEL } from '../../types'
-import type { ExpenseCategory, ItemLabelSet } from '../../types'
+import { EXPENSE_CATEGORY_LABEL, DEFAULT_TAX_RATE } from '../../types'
+import type { ExpenseCategory, ItemLabelSet, LabelDef, TaxRate } from '../../types'
 import NumberInput from '../common/NumberInput'
 import { Plus, Trash2, UploadCloud } from 'lucide-react'
 
@@ -12,8 +12,8 @@ const LOCAL_PREFIX = 'birdmen:'
 // 品目・仕入れ先マスタを管理するカテゴリ（人件費・家賃・光熱費は明細を細かく分けないため対象外）
 const LABEL_CATEGORIES: ExpenseCategory[] = ['ingredient', 'supplies', 'other']
 
-// マスタ1リスト分（例：食品仕入の仕入れ先一覧）の追加・削除エディタ
-function LabelListEditor({ title, values, onChange }: {
+// 名前だけのリスト（仕入れ先）の追加・削除エディタ
+function VendorListEditor({ title, values, onChange }: {
   title: string; values: string[]; onChange: (next: string[]) => void
 }) {
   const [draft, setDraft] = useState('')
@@ -51,6 +51,53 @@ function LabelListEditor({ title, values, onChange }: {
   )
 }
 
+// 品目マスタ（名前＋消費税率）の追加・削除・税率変更エディタ
+function ItemListEditor({ defaultRate, values, onChange }: {
+  defaultRate: TaxRate; values: LabelDef[]; onChange: (next: LabelDef[]) => void
+}) {
+  const [draft, setDraft] = useState('')
+  const add = () => {
+    const name = draft.trim()
+    if (!name || values.some(v => v.name === name)) { setDraft(''); return }
+    onChange([...values, { name, taxRate: defaultRate }])
+    setDraft('')
+  }
+  const setRate = (name: string, taxRate: TaxRate) =>
+    onChange(values.map(v => v.name === name ? { ...v, taxRate } : v))
+
+  return (
+    <div>
+      <div className="text-xs font-bold text-gray-500 mb-1.5">品目（中区分）／ 消費税率</div>
+      <div className="space-y-1 mb-2">
+        {values.map(v => (
+          <div key={v.name} className="flex items-center gap-2">
+            <span className="flex-1 text-xs text-gray-700 truncate">{v.name}</span>
+            <select value={v.taxRate} onChange={e => setRate(v.name, Number(e.target.value) as TaxRate)}
+              className="w-20 text-[11px] border border-gray-200 rounded px-1 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+              <option value={8}>8%</option>
+              <option value={10}>10%</option>
+              <option value={0}>非課税</option>
+            </select>
+            <button onClick={() => onChange(values.filter(x => x.name !== v.name))} className="text-gray-300 hover:text-red-500 shrink-0">
+              <Trash2 size={12}/>
+            </button>
+          </div>
+        ))}
+        {values.length === 0 && <span className="text-xs text-gray-300">登録なし</span>}
+      </div>
+      <div className="flex items-center gap-2">
+        <input type="text" value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add() }} placeholder="追加する品目名"
+          className="flex-1 border border-dashed border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+        <button onClick={add} disabled={!draft.trim()}
+          className="flex items-center gap-1 text-xs bg-gray-700 text-white px-2.5 py-1 rounded font-bold hover:bg-gray-800 transition disabled:opacity-30">
+          <Plus size={12}/> 追加
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function Settings() {
   const { settings, staff, itemLabels, loadSettings, saveSettings, loadStaff, saveStaff, deleteStaff, loadItemLabels, saveItemLabels } = useAppStore()
   const [newName, setNewName] = useState('')
@@ -60,7 +107,7 @@ export default function Settings() {
 
   useEffect(() => { loadSettings(); loadStaff(); loadItemLabels() }, [])
 
-  const updateLabels = (kind: keyof ItemLabelSet, cat: ExpenseCategory, next: string[]) =>
+  const updateLabels = (kind: 'vendors', cat: ExpenseCategory, next: string[]) =>
     saveItemLabels({ ...itemLabels, [kind]: { ...itemLabels[kind], [cat]: next } })
 
   const migrateFromLocalStorage = async () => {
@@ -134,16 +181,19 @@ export default function Settings() {
 
       <div className="card mb-4">
         <div className="text-sm font-bold text-gray-600 mb-1">品目・仕入れ先マスタ</div>
-        <p className="text-xs text-gray-400 mb-4">「日次入力」の仕入れ欄でプルダウンに出る選択肢です。ここで削除しても、過去に入力済みのデータは消えません</p>
+        <p className="text-xs text-gray-400 mb-4">
+          「日次入力」の仕入れ欄でプルダウンに出る選択肢です。品目に設定した消費税率は、その品目を選んだときに自動で入ります。
+          ここで削除しても、過去に入力済みのデータは消えません
+        </p>
         <div className="space-y-5">
           {LABEL_CATEGORIES.map(cat => (
             <div key={cat} className="border-t border-gray-100 pt-4 first:border-0 first:pt-0">
               <div className="text-sm font-bold text-gray-700 mb-2">{EXPENSE_CATEGORY_LABEL[cat]}</div>
               <div className="space-y-3">
-                <LabelListEditor title="仕入れ先（大区分）" values={itemLabels.vendors[cat]}
+                <VendorListEditor title="仕入れ先（大区分）" values={itemLabels.vendors[cat]}
                   onChange={next => updateLabels('vendors', cat, next)}/>
-                <LabelListEditor title="品目（中区分）" values={itemLabels.items[cat]}
-                  onChange={next => updateLabels('items', cat, next)}/>
+                <ItemListEditor defaultRate={DEFAULT_TAX_RATE[cat]} values={itemLabels.items[cat]}
+                  onChange={next => saveItemLabels({ ...itemLabels, items: { ...itemLabels.items, [cat]: next } })}/>
               </div>
             </div>
           ))}

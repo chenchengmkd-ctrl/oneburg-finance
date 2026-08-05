@@ -23,7 +23,7 @@ npm run dev
 ### データ設計（localStorage キー、すべて`birdmen:`プレフィックス）
 - `settings` - 対象月
 - `report:{YYYY-MM-DD}` - 日次残高報告（メイン入力。GMO個人/GMO法人/現金の3バケット＋見込み項目）
-- `item-labels` - 品目・仕入れ先マスタ（`ItemLabelSet`。カテゴリ別の`vendors`/`items`配列。設定画面で編集）
+- `item-labels` - 品目・仕入れ先マスタ（`ItemLabelSet`。カテゴリ別の`vendors: string[]`／`items: LabelDef[]`。`LabelDef`は`{name, taxRate}`。設定画面で編集）
 - `loans` - 借入・立替金（総額・返済済み累計を手動管理）
 - `payments` - 支払い予定（固定・変動・突発）
 
@@ -65,7 +65,15 @@ src/
 - **GMO法人**: 昨日残 / 入金（複数明細） / 引出（複数明細） / 残高目安 / スクエア入金予定（「小銭未入金」は常時発生するものではないため2026-07-25に廃止）
 - **現金（レジ金除く）**: 昨日残 / 銀行入金 / 本日現金売上 / 手渡し・現金払い（複数明細） / 残高目安 / 今後返却予定
 
-入金・引出は`LineItem[]`（`{id, label, amount, category?}`）で複数行入力できる（`LineItemsEditor`、`Report.tsx`）。引出明細には`ExpenseCategory`（食品仕入/備品仕入/人件費/家賃/水道光熱費/その他経費）を付け、損益表の費用内訳に使う。旧形式（`deposit: number`単一値）のデータは`storage.migrateReport`が読み込み時に自動変換する。
+## 消費税の扱い（2026-08-06）
+`LineItem.amount`は**常に税込（実際に支払った額）**で保持する。残高計算・損益表・資金繰りはこの値をそのまま使うので、口座残高とズレない。7月分までの既存データも税込で入力されていたためそのまま有効（移行不要）。
+- `LineItem.taxRate`（`TaxRate = 0 | 8 | 10`）に品目ごとの税率を持つ。未設定は`DEFAULT_TAX_RATE`（食材8%／備品・家賃・光熱費・その他10%／人件費0%）にフォールバックするので、税率を持たない過去データも矛盾なく集計できる
+- 「日次入力」の仕入れ欄は**入力欄が税抜**。入力値は`storage.toGross`で税込に変換して保存し、表示時は`toNet`で税抜に戻す（`ItemRow`）。行ごとに税率のプルダウン（8%／10%／非課税）があり、変更しても税抜額は保たれ税込額が再計算される
+- 品目を品目マスタから選ぶと、その品目に登録された税率が自動で入る（`ItemListEditor`で設定画面から編集）
+- カード見出しに「税込合計」と「税抜 ＋ 消費税」の内訳を併記。損益表の費用の部にも「うち消費税（仕入税額）」「税抜の費用合計」を表示する（`PLResult.expenseTax`）
+- 売上（`cash.sales`）は税込のまま扱い、税率を持たせていない。損益は税込ベースで一貫している
+
+入金・引出は`LineItem[]`（`{id, label, amount, category?, vendor?, taxRate?}`）で複数行入力できる（`LineItemsEditor`、`Report.tsx`）。引出明細には`ExpenseCategory`（食品仕入/備品仕入/人件費/家賃/水道光熱費/その他経費）を付け、損益表の費用内訳に使う。旧形式（`deposit: number`単一値）のデータは`storage.migrateReport`が読み込み時に自動変換する。
 
 計算ルール（`src/utils/reportCalc.ts`）：
 - 昨日残 = 前日の残高目安を自動引継ぎ（`prevOverride`で上書き可。**月内で最初に入力する日だけ**手入力が必須）

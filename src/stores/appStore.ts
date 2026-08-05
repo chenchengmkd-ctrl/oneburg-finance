@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet } from '../types'
-import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateReport } from '../utils/storage'
+import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, migrateReport } from '../utils/storage'
 
 interface AppState {
   // 現在のページ
@@ -133,8 +133,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   itemLabels: defaultItemLabelSet(),
   loadItemLabels: async () => {
-    const data = (await storage.get<ItemLabelSet>('item-labels')) || defaultItemLabelSet()
-    set({ itemLabels: data })
+    const raw = await storage.get<unknown>('item-labels')
+    set({ itemLabels: raw ? migrateItemLabelSet(raw) : defaultItemLabelSet() })
   },
   saveItemLabels: async (data) => {
     set({ itemLabels: data })

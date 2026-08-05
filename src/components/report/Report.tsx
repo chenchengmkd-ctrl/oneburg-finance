@@ -41,7 +41,7 @@ function LineItemsEditor({ label, items, onChange, ring, withCategory, idPrefix,
       </div>
       {withCategory && reports && itemLabels && categories.map(cat => (
         <datalist key={cat} id={`${idPrefix}-labels-${cat}`}>
-          {usedLabels(reports, cat, itemLabels.items[cat]).map(l => <option key={l} value={l}/>)}
+          {usedLabels(reports, cat, itemLabels.items[cat].map(d => d.name)).map(l => <option key={l} value={l}/>)}
         </datalist>
       ))}
       <div className="space-y-1">

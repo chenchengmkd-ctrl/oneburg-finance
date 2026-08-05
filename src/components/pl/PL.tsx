@@ -133,8 +133,16 @@ export default function PL() {
                   ))}
                 </div>
                 <div className="flex justify-between mt-3 pt-3 border-t-2 border-gray-200">
-                  <span className="font-bold">費用合計</span>
+                  <span className="font-bold">費用合計（税込）</span>
                   <span className="font-black">{fmt(pl.expenseTotal)}</span>
+                </div>
+                <div className="flex justify-between mt-1 text-xs text-gray-400">
+                  <span>うち消費税（仕入税額）</span>
+                  <span>{fmt(pl.expenseTax)}</span>
+                </div>
+                <div className="flex justify-between mt-0.5 text-xs text-gray-500">
+                  <span>税抜の費用合計</span>
+                  <span className="font-bold">{fmt(pl.expenseTotal - pl.expenseTax)}</span>
                 </div>
               </div>
             </div>

@@ -1,5 +1,26 @@
-import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet } from '../types'
+import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate } from '../types'
+import { DEFAULT_TAX_RATE, EXPENSE_CATEGORY_LABEL } from '../types'
 import { supabase } from './supabaseClient'
+
+const ALL_CATEGORIES = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
+
+// --- 消費税 ---
+// LineItem.amountは常に税込。税抜表示・入力はここで相互変換する
+export const taxRateOf = (item: Pick<LineItem, 'taxRate' | 'category'>): TaxRate =>
+  item.taxRate ?? DEFAULT_TAX_RATE[item.category ?? 'other']
+
+// 税込 → 税抜（1円未満四捨五入）
+export const toNet = (gross: number, rate: TaxRate) => Math.round(gross / (1 + rate / 100))
+
+// 税抜 → 税込（1円未満四捨五入）
+export const toGross = (net: number, rate: TaxRate) => Math.round(net * (1 + rate / 100))
+
+// 明細1行の税抜額・消費税額
+export const itemNet = (item: LineItem) => toNet(item.amount, taxRateOf(item))
+export const itemTax = (item: LineItem) => item.amount - itemNet(item)
+
+export const sumNet = (items: LineItem[]) => items.reduce((s, i) => s + itemNet(i), 0)
+export const sumTax = (items: LineItem[]) => items.reduce((s, i) => s + itemTax(i), 0)
 
 const PREFIX = 'birdmen:'
 const TABLE = 'birdmen_kv'
@@ -69,7 +90,8 @@ export const defaultReport = (date: string, pending?: ReportPending): BalanceRep
   note: ''
 })
 
-export const newLineItem = (category?: ExpenseCategory, vendor?: string): LineItem => ({ id: newItemId(), label: '', amount: 0, category, vendor })
+export const newLineItem = (category?: ExpenseCategory, vendor?: string): LineItem =>
+  ({ id: newItemId(), label: '', amount: 0, category, vendor, taxRate: category ? DEFAULT_TAX_RATE[category] : undefined })
 
 export const sumItems = (items: LineItem[]) => items.reduce((s, i) => s + i.amount, 0)
 
@@ -130,12 +152,48 @@ export const DEFAULT_VENDOR_LABELS: Record<ExpenseCategory, string[]> = {
 }
 
 // 設定画面で編集する品目・仕入れ先マスタの初期値（履歴・コード内デフォルトを合わせたもの）
+const defsFor = (cat: ExpenseCategory): LabelDef[] =>
+  DEFAULT_ITEM_LABELS[cat].map(name => ({ name, taxRate: DEFAULT_TAX_RATE[cat] }))
+
 export const defaultItemLabelSet = (): ItemLabelSet => ({
   vendors: { ingredient: [...DEFAULT_VENDOR_LABELS.ingredient], supplies: [...DEFAULT_VENDOR_LABELS.supplies], labor: [], rent: [], utility: [], other: [...DEFAULT_VENDOR_LABELS.other] },
-  items: { ingredient: [...DEFAULT_ITEM_LABELS.ingredient], supplies: [...DEFAULT_ITEM_LABELS.supplies], labor: [], rent: [...DEFAULT_ITEM_LABELS.rent], utility: [...DEFAULT_ITEM_LABELS.utility], other: [...DEFAULT_ITEM_LABELS.other] },
+  items: { ingredient: defsFor('ingredient'), supplies: defsFor('supplies'), labor: [], rent: defsFor('rent'), utility: defsFor('utility'), other: defsFor('other') },
 })
 
-// 指定カテゴリの品目名入力候補（マスタ登録分＋過去に実際に使った品目名。入力時の選択候補用）
+// 旧形式（items が string[] だった頃）のマスタを LabelDef[] へ変換。税率はカテゴリ既定を充てる
+export const migrateItemLabelSet = (raw: any): ItemLabelSet => {
+  if (!raw) return defaultItemLabelSet()
+  const items = {} as Record<ExpenseCategory, LabelDef[]>
+  const vendors = {} as Record<ExpenseCategory, string[]>
+  for (const cat of ALL_CATEGORIES) {
+    const list: any[] = Array.isArray(raw.items?.[cat]) ? raw.items[cat] : []
+    items[cat] = list.map(v => typeof v === 'string'
+      ? { name: v, taxRate: DEFAULT_TAX_RATE[cat] }
+      : { name: v.name, taxRate: (v.taxRate ?? DEFAULT_TAX_RATE[cat]) as TaxRate })
+    vendors[cat] = Array.isArray(raw.vendors?.[cat]) ? raw.vendors[cat] : []
+  }
+  return { vendors, items }
+}
+
+// 指定カテゴリの品目候補（マスタ登録分＋過去に実際に使った品目名。履歴分の税率はカテゴリ既定）
+export const usedLabelDefs = (reports: Record<string, BalanceReport>, category: ExpenseCategory, master: LabelDef[]): LabelDef[] => {
+  const seen = new Set(master.map(d => d.name))
+  const extra: LabelDef[] = []
+  for (const r of Object.values(reports)) {
+    for (const bucket of [r.pers, r.corp, r.cash]) {
+      for (const w of bucket.withdraws) {
+        const label = w.label.trim()
+        if (w.category === category && label && !seen.has(label)) {
+          seen.add(label)
+          extra.push({ name: label, taxRate: w.taxRate ?? DEFAULT_TAX_RATE[category] })
+        }
+      }
+    }
+  }
+  return [...master, ...extra]
+}
+
+// 指定カテゴリの品目名一覧（datalist用。名前だけ必要な場所で使う）
 export const usedLabels = (reports: Record<string, BalanceReport>, category: ExpenseCategory, master: string[] = DEFAULT_ITEM_LABELS[category]): string[] => {
   const seen = new Set(master)
   const extra: string[] = []

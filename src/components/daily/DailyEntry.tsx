@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { defaultReport, newShiftEntry, newLineItem, sumItems, sumShiftPay, shiftPay, calcShiftHours, usedLabels, usedVendors, applyShiftsToReport } from '../../utils/storage'
+import { defaultReport, newShiftEntry, newLineItem, sumItems, sumNet, sumTax, sumShiftPay, shiftPay, calcShiftHours, usedLabelDefs, usedVendors, applyShiftsToReport, taxRateOf, toNet, toGross } from '../../utils/storage'
 import { calcPL } from '../../utils/plCalc'
 import { fmt, fmtShort, fmtHours, getDayOfWeek, isWeekend } from '../../utils/calculations'
-import type { BalanceReport, ExpenseCategory, LineItem, ShiftEntry } from '../../types'
+import type { BalanceReport, ExpenseCategory, LineItem, ShiftEntry, LabelDef, TaxRate } from '../../types'
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, BarChart3, Plus, X, Users, ClipboardPaste, Pencil, List } from 'lucide-react'
 import NumberInput from '../common/NumberInput'
 import ShiftBulkImportModal from './ShiftBulkImportModal'
@@ -60,18 +60,40 @@ function PickField({ value, options, placeholder, addLabel, onChange, className 
   )
 }
 
-// 品目1行（品目名＋金額）。QuickItemsCardの外に置くことで、入力のたびに作り直されてフォーカスが外れるのを防ぐ
-function ItemRow({ item, labelOptions, onUpdate, onRemove }: {
-  item: LineItem; labelOptions: string[]
+// 品目1行（品目名＋税抜金額＋税率）。QuickItemsCardの外に置くことで、入力のたびに作り直されてフォーカスが外れるのを防ぐ
+// 入力欄は税抜だが、保存する`amount`は税込（実際に払った額）。残高・損益は税込のまま計算される
+function ItemRow({ item, labelDefs, onUpdate, onRemove }: {
+  item: LineItem; labelDefs: LabelDef[]
   onUpdate: (patch: Partial<LineItem>) => void; onRemove: () => void
 }) {
+  const rate = taxRateOf(item)
+  const net = toNet(item.amount, rate)
+
+  // 品目を選び直したらマスタの税率も引き継ぐ（税抜額は保ったまま税込を再計算）
+  const pickLabel = (name: string) => {
+    const def = labelDefs.find(d => d.name === name)
+    const nextRate = def ? def.taxRate : rate
+    onUpdate({ label: name, taxRate: nextRate, amount: toGross(net, nextRate) })
+  }
+  const changeRate = (nextRate: TaxRate) => onUpdate({ taxRate: nextRate, amount: toGross(net, nextRate) })
+
   return (
     <div className="flex items-center gap-2">
-      <PickField value={item.label} options={labelOptions} placeholder="品目を選択" addLabel="＋ 新しい品目を入力"
-        onChange={v => onUpdate({ label: v })}
-        className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-white"/>
-      <NumberInput value={item.amount} onChange={v => onUpdate({ amount: v })}
-        className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
+      <PickField value={item.label} options={labelDefs.map(d => d.name)} placeholder="品目を選択" addLabel="＋ 新しい品目を入力"
+        onChange={pickLabel}
+        className="flex-1 min-w-0 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-white"/>
+      <select value={rate} onChange={e => changeRate(Number(e.target.value) as TaxRate)}
+        title="消費税率"
+        className="w-14 shrink-0 text-[11px] text-gray-500 border border-gray-200 rounded px-1 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-white">
+        <option value={8}>8%</option>
+        <option value={10}>10%</option>
+        <option value={0}>非課税</option>
+      </select>
+      <div className="w-28 shrink-0">
+        <NumberInput value={net} onChange={v => onUpdate({ amount: toGross(v, rate) })}
+          className="w-full text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
+        <div className="text-[10px] text-gray-400 text-right mt-0.5">税込 {fmtShort(item.amount)}</div>
+      </div>
       <button onClick={onRemove} className="text-gray-300 hover:text-red-500 shrink-0"><X size={14}/></button>
     </div>
   )
@@ -79,11 +101,13 @@ function ItemRow({ item, labelOptions, onUpdate, onRemove }: {
 
 // 食材・備品などの仕入れ：仕入れ先（大区分）＞品目（中区分）＞金額（小区分）の3階層で入力
 // 仕入れ先を設定しない行はグループ化せずフラットに表示（従来通りのシンプル入力も引き続き可能）
-function QuickItemsCard({ title, color, category, items, labelOptions, vendorOptions, onChange, hint }: {
+function QuickItemsCard({ title, color, category, items, labelDefs, vendorOptions, onChange, hint }: {
   title: string; color: string; category: ExpenseCategory
-  items: LineItem[]; labelOptions: string[]; vendorOptions: string[]; onChange: (items: LineItem[]) => void; hint?: string
+  items: LineItem[]; labelDefs: LabelDef[]; vendorOptions: string[]; onChange: (items: LineItem[]) => void; hint?: string
 }) {
   const total = sumItems(items)
+  const netTotal = sumNet(items)
+  const taxTotal = sumTax(items)
   const update = (id: string, patch: Partial<LineItem>) => onChange(items.map(i => i.id === id ? { ...i, ...patch } : i))
   const remove = (id: string) => onChange(items.filter(i => i.id !== id))
   const addFlat = () => onChange([...items, newLineItem(category)])
@@ -103,15 +127,18 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
   }
 
   const row = (item: LineItem) => (
-    <ItemRow key={item.id} item={item} labelOptions={labelOptions}
+    <ItemRow key={item.id} item={item} labelDefs={labelDefs}
       onUpdate={patch => update(item.id, patch)} onRemove={() => remove(item.id)}/>
   )
 
   return (
     <div className="card mb-6">
-      <div className={`flex items-center justify-between ${hint ? 'mb-1' : 'mb-3'}`}>
+      <div className={`flex items-start justify-between ${hint ? 'mb-1' : 'mb-3'}`}>
         <span className={`text-sm font-bold ${color}`}>{title}</span>
-        <span className={`text-lg font-black ${color}`}>{fmt(total)}</span>
+        <div className="text-right">
+          <div className={`text-lg font-black ${color}`}>{fmt(total)}</div>
+          <div className="text-[10px] text-gray-400">税抜 {fmtShort(netTotal)} ＋ 消費税 {fmtShort(taxTotal)}</div>
+        </div>
       </div>
       {hint && <p className="text-[11px] text-gray-400 mb-2">{hint}</p>}
 
@@ -182,9 +209,9 @@ export default function DailyEntry() {
   const profit = sales - labor - ingredient - supplies - other
 
   const monthPL = useMemo(() => calcPL(reports, month), [reports, month])
-  const ingredientLabels = useMemo(() => usedLabels(reports, 'ingredient', itemLabels.items.ingredient), [reports, itemLabels])
-  const suppliesLabels = useMemo(() => usedLabels(reports, 'supplies', itemLabels.items.supplies), [reports, itemLabels])
-  const otherLabels = useMemo(() => usedLabels(reports, 'other', itemLabels.items.other), [reports, itemLabels])
+  const ingredientLabels = useMemo(() => usedLabelDefs(reports, 'ingredient', itemLabels.items.ingredient), [reports, itemLabels])
+  const suppliesLabels = useMemo(() => usedLabelDefs(reports, 'supplies', itemLabels.items.supplies), [reports, itemLabels])
+  const otherLabels = useMemo(() => usedLabelDefs(reports, 'other', itemLabels.items.other), [reports, itemLabels])
   const ingredientVendors = useMemo(() => usedVendors(reports, 'ingredient', itemLabels.vendors.ingredient), [reports, itemLabels])
   const suppliesVendors = useMemo(() => usedVendors(reports, 'supplies', itemLabels.vendors.supplies), [reports, itemLabels])
   const otherVendors = useMemo(() => usedVendors(reports, 'other', itemLabels.vendors.other), [reports, itemLabels])
@@ -347,10 +374,10 @@ export default function DailyEntry() {
       </div>
 
       <QuickItemsCard title="仕入れ（食材）" color="text-red-700" category="ingredient"
-        items={ingredientItems} labelOptions={ingredientLabels} vendorOptions={ingredientVendors} onChange={items => updateCategoryItems('ingredient', items)}
+        items={ingredientItems} labelDefs={ingredientLabels} vendorOptions={ingredientVendors} onChange={items => updateCategoryItems('ingredient', items)}
         hint="「仕入れ先を追加」で肉のハナマサ等をまとめ、その中に日本酒・お米など品目ごとの金額を入れると、損益表で細かく見られます"/>
       <QuickItemsCard title="仕入れ（備品）" color="text-orange-700" category="supplies"
-        items={suppliesItems} labelOptions={suppliesLabels} vendorOptions={suppliesVendors} onChange={items => updateCategoryItems('supplies', items)}/>
+        items={suppliesItems} labelDefs={suppliesLabels} vendorOptions={suppliesVendors} onChange={items => updateCategoryItems('supplies', items)}/>
 
       <div className="flex items-center justify-between px-1 mb-6 -mt-3">
         <span className="text-xs font-bold text-gray-500">仕入れ合計（食材＋備品）</span>
@@ -358,7 +385,7 @@ export default function DailyEntry() {
       </div>
 
       <QuickItemsCard title="その他経費（家賃・光熱費・ATM手数料など）" color="text-gray-600" category="other"
-        items={otherItems} labelOptions={otherLabels} vendorOptions={otherVendors} onChange={items => updateCategoryItems('other', items)}/>
+        items={otherItems} labelDefs={otherLabels} vendorOptions={otherVendors} onChange={items => updateCategoryItems('other', items)}/>
 
       {showBulkImport && <ShiftBulkImportModal onClose={() => setShowBulkImport(false)}/>}
       </>

@@ -1,5 +1,6 @@
 import type { BalanceReport, ExpenseCategory } from '../types'
 import { EXPENSE_CATEGORY_LABEL } from '../types'
+import { itemTax } from './storage'
 
 export interface PLExpenseLine {
   category: ExpenseCategory
@@ -36,7 +37,8 @@ export interface PLResult {
   persDeposit: number     // 個人入金
   revenueTotal: number    // 収入合計
   expenseByCategory: PLExpenseLine[]  // カテゴリ別支出（食品仕入・備品仕入・人件費・家賃・水道光熱費・その他）
-  expenseTotal: number    // 支出合計
+  expenseTotal: number    // 支出合計（税込）
+  expenseTax: number      // 支出に含まれる消費税（仕入税額）
   profit: number          // 損益 = 収入合計 − 支出合計
   ledger: PLLedgerRow[]   // 全引出明細（日付順）
   labelBreakdown: PLLabelBreakdown[]  // カテゴリ×項目名別の内訳（「肉のハナマサ」ではなく「日本酒」「お米」等、実際に何にコストをかけたか把握する用）
@@ -89,6 +91,7 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
     ingredient: 0, supplies: 0, labor: 0, rent: 0, utility: 0, other: 0,
   }
   const ledger: PLLedgerRow[] = []
+  let expenseTax = 0
 
   for (const date of dates) {
     const r = reports[date]
@@ -100,6 +103,7 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
       for (const item of day.withdraws) {
         const cat = item.category ?? 'other'
         expenseMap[cat] += item.amount
+        expenseTax += itemTax(item)
         ledger.push({ date, bucket, label: item.label || '（無題）', vendor: item.vendor ?? '', amount: item.amount, category: cat })
       }
     }
@@ -115,7 +119,7 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
 
   return {
     month, cashSales, corpDeposit, persDeposit, revenueTotal,
-    expenseByCategory, expenseTotal, profit: revenueTotal - expenseTotal,
+    expenseByCategory, expenseTotal, expenseTax, profit: revenueTotal - expenseTotal,
     ledger: ledger.sort((a, b) => a.date.localeCompare(b.date)),
     labelBreakdown,
     daysWithData: dates.length,

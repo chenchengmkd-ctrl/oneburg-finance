@@ -40,10 +40,29 @@ export interface ScheduledPayment {
 // 支出の分類（損益表の費用内訳に使う。引出明細に付ける。収入側では未使用）
 export type ExpenseCategory = 'ingredient' | 'supplies' | 'labor' | 'rent' | 'utility' | 'other'
 
+// 消費税率（%）。0=不課税・非課税（人件費など）、8=軽減税率（食材）、10=標準税率
+export type TaxRate = 0 | 8 | 10
+
+// カテゴリ別の既定税率（品目マスタに税率がない場合のフォールバック）
+export const DEFAULT_TAX_RATE: Record<ExpenseCategory, TaxRate> = {
+  ingredient: 8,
+  supplies:   10,
+  labor:      0,
+  rent:       10,
+  utility:    10,
+  other:      10,
+}
+
+// 品目マスタ1件（名前＋その品目の消費税率）
+export interface LabelDef {
+  name: string
+  taxRate: TaxRate
+}
+
 // 仕入れ先・品目の候補マスタ（カテゴリ別。設定画面で編集可能）
 export interface ItemLabelSet {
   vendors: Record<ExpenseCategory, string[]>
-  items: Record<ExpenseCategory, string[]>
+  items: Record<ExpenseCategory, LabelDef[]>
 }
 
 export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
@@ -56,12 +75,15 @@ export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
 }
 
 // 入金・引出の明細1行（複数行入力に対応するため）
+// amountは常に「税込（実際に支払った額）」で保持する。残高計算・損益はこの値をそのまま使う。
+// 税抜額はtaxRateから逆算して表示する（入力欄は税抜だが、保存されるのは税込）
 export interface LineItem {
   id: string
   label: string
-  amount: number
+  amount: number               // 税込金額
   category?: ExpenseCategory   // 引出のみ使用。未設定は'other'扱い
   vendor?: string              // 仕入れ先（大区分）。未設定＝仕入れ先グループなしのフラット項目として扱う
+  taxRate?: TaxRate            // 未設定はカテゴリ既定（DEFAULT_TAX_RATE）を使う
 }
 
 // 残高報告：口座バケット（GMO個人・GMO法人）
