@@ -21,6 +21,27 @@ function BigInput({ label, value, onChange, color }: {
   )
 }
 
+// 選択肢がほぼ固まっている項目向け：普段はプルダウン選択、リストにないものだけ「＋ 新規入力」でその場で自由入力に切り替え
+function PickField({ value, options, placeholder, addLabel, onChange, className }: {
+  value: string; options: string[]; placeholder: string; addLabel: string; onChange: (v: string) => void; className: string
+}) {
+  const [customMode, setCustomMode] = useState(() => value !== '' && !options.includes(value))
+
+  if (customMode) {
+    return <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className={className} autoFocus/>
+  }
+  return (
+    <select value={value} onChange={e => {
+      if (e.target.value === '__custom__') setCustomMode(true)
+      else onChange(e.target.value)
+    }} className={className}>
+      <option value="">{placeholder}</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+      <option value="__custom__">{addLabel}</option>
+    </select>
+  )
+}
+
 // 食材・備品などの仕入れ：仕入れ先（大区分）＞品目（中区分）＞金額（小区分）の3階層で入力
 // 仕入れ先を設定しない行はグループ化せずフラットに表示（従来通りのシンプル入力も引き続き可能）
 function QuickItemsCard({ title, color, category, items, labelOptions, vendorOptions, onChange, hint }: {
@@ -28,8 +49,6 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
   items: LineItem[]; labelOptions: string[]; vendorOptions: string[]; onChange: (items: LineItem[]) => void; hint?: string
 }) {
   const total = sumItems(items)
-  const itemListId = `quick-items-${category}`
-  const vendorListId = `quick-vendors-${category}`
   const update = (id: string, patch: Partial<LineItem>) => onChange(items.map(i => i.id === id ? { ...i, ...patch } : i))
   const remove = (id: string) => onChange(items.filter(i => i.id !== id))
   const addFlat = () => onChange([...items, newLineItem(category)])
@@ -49,9 +68,9 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
 
   const ItemRow = ({ item }: { item: LineItem }) => (
     <div className="flex items-center gap-2">
-      <input type="text" list={itemListId} value={item.label} onChange={e => update(item.id, { label: e.target.value })}
-        placeholder="品目名（例：日本酒）"
-        className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
+      <PickField value={item.label} options={labelOptions} placeholder="品目を選択" addLabel="＋ 新しい品目を入力"
+        onChange={v => update(item.id, { label: v })}
+        className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-white"/>
       <NumberInput value={item.amount} onChange={v => update(item.id, { amount: v })}
         className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-300"/>
       <button onClick={() => remove(item.id)} className="text-gray-300 hover:text-red-500 shrink-0"><X size={14}/></button>
@@ -65,12 +84,6 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
         <span className={`text-lg font-black ${color}`}>{fmt(total)}</span>
       </div>
       {hint && <p className="text-[11px] text-gray-400 mb-2">{hint}</p>}
-      <datalist id={itemListId}>
-        {labelOptions.map(l => <option key={l} value={l}/>)}
-      </datalist>
-      <datalist id={vendorListId}>
-        {vendorOptions.map(v => <option key={v} value={v}/>)}
-      </datalist>
 
       {flatItems.length > 0 && (
         <div className="space-y-2 mb-2">
@@ -85,8 +98,8 @@ function QuickItemsCard({ title, color, category, items, labelOptions, vendorOpt
             return (
               <div key={vendor} className="border border-gray-100 rounded-lg p-2 bg-gray-50">
                 <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <input type="text" list={vendorListId} value={vendor} onChange={e => renameVendor(vendor, e.target.value)}
-                    placeholder="仕入れ先名（例：肉のハナマサ）"
+                  <PickField value={vendor} options={vendorOptions} placeholder="仕入れ先を選択" addLabel="＋ 新しい仕入れ先を入力"
+                    onChange={v => renameVendor(vendor, v)}
                     className="text-sm font-bold text-gray-700 bg-transparent border-b border-dashed border-gray-300 focus:outline-none focus:border-gray-500 flex-1"/>
                   <span className="text-xs font-black text-gray-500 shrink-0">{fmt(sumItems(groupItems))}</span>
                 </div>
