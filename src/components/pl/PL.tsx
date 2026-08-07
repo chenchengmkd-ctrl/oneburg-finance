@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import { fmt, fmtShort, todayStr } from '../../utils/calculations'
-import { calcPL, calcDailyPL, groupLedger, PL_BUCKET_LABEL, UNSET_KEY } from '../../utils/plCalc'
+import { calcPL, calcDailyPL, groupLedger, PL_BUCKET_LABEL, UNSET_KEY, NO_LABEL_KEY } from '../../utils/plCalc'
 import type { PLGroupRow, PLLedgerRow } from '../../utils/plCalc'
 import { calcBudget, isOverPace, isBehindPace } from '../../utils/budgetCalc'
 import { downloadCsv } from '../../utils/csvExport'
@@ -54,13 +54,17 @@ function ProgressRow({ label, actual, plan, rate, paceRate, color, behindIsBad }
   )
 }
 
-// 仕入れ先別／品目別の集計カード。行をクリックすると、もう片方のカードがその内訳に絞り込まれる
-function GroupCard({ title, note, rows, selected, onSelect }: {
-  title: string; note?: string; rows: PLGroupRow[]
+// 仕入れ先別／品目別の集計カード。行をクリックすると、もう片方のカードがその内訳に絞り込まれる。
+// unsetKey＝「わからない」を表す行（仕入れ先未入力／品目未入力）。金額・割合を上部に常に出し、
+// リストの並び順に埋もれず一目で仕分け漏れの規模がわかるようにする
+function GroupCard({ title, unsetKey, unsetLabel, note, rows, selected, onSelect }: {
+  title: string; unsetKey: string; unsetLabel: string; note?: string; rows: PLGroupRow[]
   selected: string | null; onSelect: (key: string) => void
 }) {
   const total = rows.reduce((s, r) => s + r.amount, 0)
   const max = Math.max(1, ...rows.map(r => r.amount))
+  const unset = rows.find(r => r.key === unsetKey)
+  const unsetPct = unset && total > 0 ? Math.round((unset.amount / total) * 100) : 0
   return (
     <div className="card">
       <div className="flex items-baseline justify-between mb-1">
@@ -68,6 +72,12 @@ function GroupCard({ title, note, rows, selected, onSelect }: {
         <span className="text-sm font-black text-gray-700">{fmt(total)}</span>
       </div>
       {note && <p className="text-[11px] text-blue-600 mb-1.5">{note}</p>}
+      <button onClick={() => unset && onSelect(unset.key)} disabled={!unset}
+        className={`w-full text-left text-[11px] mb-2 px-1.5 py-1 rounded flex items-center justify-between ${
+          unset ? 'bg-orange-50 text-orange-700 hover:bg-orange-100' : 'text-gray-300'}`}>
+        <span>{unsetLabel}</span>
+        <span className="font-bold">{unset ? `${fmt(unset.amount)}（${unsetPct}%・${unset.count}件）` : '¥0'}</span>
+      </button>
       {rows.length === 0 ? (
         <div className="text-xs text-gray-400 py-3 text-center">データがありません</div>
       ) : (
@@ -76,7 +86,7 @@ function GroupCard({ title, note, rows, selected, onSelect }: {
             <button key={r.key} onClick={() => onSelect(r.key)}
               className={`w-full text-left rounded px-1.5 py-1 transition ${selected === r.key ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-gray-50'}`}>
               <div className="flex items-baseline gap-2 text-xs mb-0.5">
-                <span className={`flex-1 truncate ${r.key === UNSET_KEY ? 'text-gray-400' : 'text-gray-700'}`}>{r.key}</span>
+                <span className={`flex-1 truncate ${r.key === unsetKey ? 'text-gray-400' : 'text-gray-700'}`}>{r.key}</span>
                 <span className="text-[10px] text-gray-400 shrink-0">
                   {r.count > 1 && `×${r.count} `}{total > 0 ? `${Math.round((r.amount / total) * 100)}%` : ''}
                 </span>
@@ -336,11 +346,11 @@ export default function PL() {
                 行をクリックすると、もう片方がその内訳だけになります（人件費は除く）
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                <GroupCard title="仕入れ先別" rows={vendorRows}
+                <GroupCard title="仕入れ先別" rows={vendorRows} unsetKey={UNSET_KEY} unsetLabel="仕入れ先が未入力"
                   note={focus?.type === 'item' ? `「${focus.key}」を買った仕入れ先` : undefined}
                   selected={focus?.type === 'vendor' ? focus.key : null}
                   onSelect={key => setFocus(f => f?.type === 'vendor' && f.key === key ? null : { type: 'vendor', key })}/>
-                <GroupCard title="品目別" rows={itemRows}
+                <GroupCard title="品目別" rows={itemRows} unsetKey={NO_LABEL_KEY} unsetLabel="品目が未入力（何に使ったか不明）"
                   note={focus?.type === 'vendor' ? `「${focus.key}」で買ったもの` : undefined}
                   selected={focus?.type === 'item' ? focus.key : null}
                   onSelect={key => setFocus(f => f?.type === 'item' && f.key === key ? null : { type: 'item', key })}/>

@@ -25,6 +25,10 @@ export interface PLGroupRow {
   category: ExpenseCategory  // 金額が最も大きいカテゴリ（表示のタグ・色に使う）
 }
 
+// 品目名が未入力の明細に付けるラベル（何にいくら使ったか分からない金額を可視化するため、
+// UNSET_KEY＝仕入れ先未入力とは区別する）
+export const NO_LABEL_KEY = '（無題）'
+
 export interface PLResult {
   month: string
   cashSales: number       // 現金売上
@@ -98,7 +102,7 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
         const cat = item.category ?? 'other'
         expenseMap[cat] += item.amount
         expenseTax += itemTax(item)
-        ledger.push({ date, bucket, label: item.label || '（無題）', vendor: item.vendor ?? '', amount: item.amount, category: cat })
+        ledger.push({ date, bucket, label: item.label || NO_LABEL_KEY, vendor: item.vendor ?? '', amount: item.amount, category: cat })
       }
     }
   }
