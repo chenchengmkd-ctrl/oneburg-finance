@@ -3,11 +3,15 @@ import { useAppStore } from '../../stores/appStore'
 import { storage } from '../../utils/storage'
 import { supabase } from '../../utils/supabaseClient'
 import { EXPENSE_CATEGORY_LABEL, DEFAULT_TAX_RATE } from '../../types'
-import type { ExpenseCategory, LabelDef, TaxRate } from '../../types'
+import type { ExpenseCategory, LabelDef, TaxRate, MonthBudget } from '../../types'
+import { emptyMonthBudget, budgetFor } from '../../utils/storage'
+import { fmt } from '../../utils/calculations'
 import NumberInput from '../common/NumberInput'
 import { Plus, Trash2, UploadCloud } from 'lucide-react'
 
 const LOCAL_PREFIX = 'birdmen:'
+
+const ALL_EXPENSE_CATEGORIES = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
 
 // 品目・仕入れ先マスタを管理するカテゴリ（人件費・家賃・光熱費は明細を細かく分けないため対象外）
 const LABEL_CATEGORIES: ExpenseCategory[] = ['ingredient', 'supplies', 'other']
@@ -47,6 +51,70 @@ function VendorListEditor({ title, values, onChange }: {
           <Plus size={12}/> 追加
         </button>
       </div>
+    </div>
+  )
+}
+
+// 予算エディタ。金額はすべて税込（実績と同じ土俵で比べるため）
+// 変更は「差分（patch）」で親に渡す。全体を組み立てて渡すと、連続更新のときに
+// 古いvalueを元にした保存が新しい値を上書きしてしまうため
+function BudgetEditor({ value, onPatch, onPatchExpense, month, isDefault }: {
+  value: MonthBudget
+  onPatch: (patch: Partial<Omit<MonthBudget, 'expenses'>>) => void
+  onPatchExpense: (cat: ExpenseCategory, v: number) => void
+  month: string; isDefault: boolean
+}) {
+  const expenseTotal = ALL_EXPENSE_CATEGORIES.reduce((s, c) => s + (value.expenses[c] ?? 0), 0)
+  const days = (() => {
+    const [y, m] = month.split('-').map(Number)
+    return new Date(y, m, 0).getDate()
+  })()
+  const autoDaily = value.revenue > 0 ? Math.round(value.revenue / days) : 0
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500 w-24 shrink-0">売上目標（月）</span>
+        <NumberInput value={value.revenue} onChange={v => onPatch({ revenue: v })}
+          className="flex-1 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500 w-24 shrink-0">1日の売上目標</span>
+        <NumberInput value={value.dailyRevenue} onChange={v => onPatch({ dailyRevenue: v })}
+          className="flex-1 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+      </div>
+      <p className="text-[11px] text-gray-400 -mt-1">
+        0のままなら「売上目標 ÷ {days}日 = {fmt(autoDaily)}」を自動で使います
+      </p>
+
+      <div className="pt-2 border-t border-gray-100">
+        <div className="text-xs font-bold text-gray-500 mb-2">費用予算（カテゴリ別・月）</div>
+        <div className="space-y-2">
+          {ALL_EXPENSE_CATEGORIES.map(cat => (
+            <div key={cat} className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 w-24 shrink-0">{EXPENSE_CATEGORY_LABEL[cat]}</span>
+              <NumberInput value={value.expenses[cat] ?? 0} onChange={v => onPatchExpense(cat, v)}
+                className="flex-1 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-gray-100 space-y-1 text-xs">
+        <div className="flex justify-between"><span className="text-gray-500">費用予算 合計</span><span className="font-bold">{fmt(expenseTotal)}</span></div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">目標損益</span>
+          <span className={`font-black ${value.revenue - expenseTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {fmt(value.revenue - expenseTotal)}
+          </span>
+        </div>
+      </div>
+
+      {isDefault && (
+        <p className="text-[11px] text-gray-400">
+          ここで入れた値が毎月の既定になります。特定の月だけ変えたい場合は上の切替を「{month.replace('-', '年')}月だけ」にしてください
+        </p>
+      )}
     </div>
   )
 }
@@ -99,16 +167,46 @@ function ItemListEditor({ defaultRate, values, onChange }: {
 }
 
 export default function Settings() {
-  const { settings, staff, itemLabels, loadSettings, saveSettings, loadStaff, saveStaff, deleteStaff, loadItemLabels, saveItemLabels } = useAppStore()
+  const { settings, staff, itemLabels, budget, loadSettings, saveSettings, loadStaff, saveStaff, deleteStaff, loadItemLabels, saveItemLabels, loadBudget, saveBudget } = useAppStore()
+  const [budgetScope, setBudgetScope] = useState<'default' | 'month'>('default')
   const [newName, setNewName] = useState('')
   const [migrating, setMigrating] = useState(false)
   const [migrateResult, setMigrateResult] = useState<string | null>(null)
   const localKeys = Object.keys(localStorage).filter(k => k.startsWith(LOCAL_PREFIX))
 
-  useEffect(() => { loadSettings(); loadStaff(); loadItemLabels() }, [])
+  useEffect(() => { loadSettings(); loadStaff(); loadItemLabels(); loadBudget() }, [])
 
   const updateLabels = (kind: 'vendors', cat: ExpenseCategory, next: string[]) =>
     saveItemLabels({ ...itemLabels, [kind]: { ...itemLabels[kind], [cat]: next } })
+
+  const targetMonth = settings.targetMonth
+  // 「毎月の既定」か「この月だけ」かで、編集対象と保存先を切り替える
+  const editingBudget: MonthBudget = budgetScope === 'default'
+    ? (budget.default ?? emptyMonthBudget())
+    : budgetFor(budget, targetMonth)
+
+  // 保存のたびにストアの最新値を読み直してから差分を当てる（連続更新で取りこぼさないため）
+  const patchBudget = (apply: (cur: MonthBudget) => MonthBudget) => {
+    const cur = useAppStore.getState().budget
+    if (budgetScope === 'default') {
+      saveBudget({ ...cur, default: apply(cur.default ?? emptyMonthBudget()) })
+    } else {
+      saveBudget({ ...cur, months: { ...cur.months, [targetMonth]: apply(budgetFor(cur, targetMonth)) } })
+    }
+  }
+
+  const onPatchBudget = (patch: Partial<Omit<MonthBudget, 'expenses'>>) =>
+    patchBudget(cur => ({ ...cur, ...patch }))
+
+  const onPatchBudgetExpense = (cat: ExpenseCategory, v: number) =>
+    patchBudget(cur => ({ ...cur, expenses: { ...cur.expenses, [cat]: v } }))
+
+  const clearMonthOverride = () => {
+    const months = { ...budget.months }
+    delete months[targetMonth]
+    saveBudget({ ...budget, months })
+    setBudgetScope('default')
+  }
 
   const migrateFromLocalStorage = async () => {
     setMigrating(true)
@@ -142,6 +240,33 @@ export default function Settings() {
         <input type="month" value={settings.targetMonth} onChange={e => saveSettings({ targetMonth: e.target.value })}
           className="input-cell w-48"/>
         <p className="text-xs text-gray-400 mt-2">ダッシュボード・支払い予定の集計対象月です</p>
+      </div>
+
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-sm font-bold text-gray-600">予算（予実管理）</div>
+          <div className="flex gap-1">
+            <button onClick={() => setBudgetScope('default')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition ${budgetScope === 'default' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+              毎月の既定
+            </button>
+            <button onClick={() => setBudgetScope('month')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition ${budgetScope === 'month' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+              {targetMonth.replace('-', '年')}月だけ
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">
+          金額は税込で入れてください（実績と同じ土俵で比較します）。0のままの項目は予実に表示されません
+        </p>
+        <BudgetEditor value={editingBudget} onPatch={onPatchBudget} onPatchExpense={onPatchBudgetExpense}
+          month={targetMonth} isDefault={budgetScope === 'default'}/>
+        {budgetScope === 'month' && budget.months?.[targetMonth] && (
+          <button onClick={clearMonthOverride}
+            className="mt-3 text-[11px] text-gray-400 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">
+            この月の個別設定を消して既定に戻す
+          </button>
+        )}
       </div>
 
       <div className="card mb-4">

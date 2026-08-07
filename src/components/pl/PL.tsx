@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { fmt, fmtShort } from '../../utils/calculations'
+import { fmt, fmtShort, todayStr } from '../../utils/calculations'
 import { calcPL, calcDailyPL, PL_BUCKET_LABEL } from '../../utils/plCalc'
+import { calcBudget, isOverPace, isBehindPace } from '../../utils/budgetCalc'
 import { downloadCsv } from '../../utils/csvExport'
 import { EXPENSE_CATEGORY_LABEL } from '../../types'
 import type { ExpenseCategory } from '../../types'
@@ -18,6 +19,40 @@ const CATEGORY_COLOR: Record<string, string> = {
 
 const EXPENSE_CATEGORIES = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
 
+// 予実の1行。実績バーの上に「今日時点であるべきペース」の線を出す
+function ProgressRow({ label, actual, plan, rate, paceRate, color, behindIsBad }: {
+  label: string; actual: number; plan: number
+  rate: number | null; paceRate: number; color: string; behindIsBad?: boolean
+}) {
+  if (plan <= 0) return null
+  const pctVal = Math.round((rate ?? 0) * 100)
+  const bad = behindIsBad ? isBehindPace(rate, paceRate) : isOverPace(rate, paceRate)
+  const diff = behindIsBad ? actual - plan : plan - actual
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-sm mb-1">
+        <span className="text-gray-600">{label}</span>
+        <span className="flex items-baseline gap-2">
+          <span className={`text-[11px] ${bad ? 'text-red-500 font-bold' : 'text-gray-400'}`}>{pctVal}%</span>
+          <span className="font-bold text-gray-700">{fmt(actual)}</span>
+          <span className="text-[11px] text-gray-400">／ {fmt(plan)}</span>
+        </span>
+      </div>
+      <div className="h-2 bg-gray-100 rounded overflow-hidden relative">
+        <div className={`h-full ${color} rounded`} style={{ width: `${Math.min(100, pctVal)}%` }}/>
+        {paceRate > 0 && paceRate < 1 && (
+          <div className="absolute top-0 h-full w-px bg-gray-600/70" style={{ left: `${paceRate * 100}%` }}/>
+        )}
+      </div>
+      <div className={`text-[11px] mt-0.5 text-right ${diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+        {behindIsBad
+          ? (diff >= 0 ? `目標超過 +${fmt(diff)}` : `目標まで ${fmt(-diff)}`)
+          : (diff >= 0 ? `残り ${fmt(diff)}` : `予算超過 ${fmt(-diff)}`)}
+      </div>
+    </div>
+  )
+}
+
 const shiftMonth = (month: string, delta: number) => {
   const [y, m] = month.split('-').map(Number)
   const d = new Date(y, m - 1 + delta, 1)
@@ -25,15 +60,17 @@ const shiftMonth = (month: string, delta: number) => {
 }
 
 export default function PL() {
-  const { reports, loadReports, settings, loadSettings } = useAppStore()
+  const { reports, loadReports, settings, loadSettings, budget, loadBudget } = useAppStore()
   const [month, setMonth] = useState('')
+  const todayIso = todayStr()
 
-  useEffect(() => { loadReports(); loadSettings() }, [])
+  useEffect(() => { loadReports(); loadSettings(); loadBudget() }, [])
   useEffect(() => { if (!month && settings.targetMonth) setMonth(settings.targetMonth) }, [settings.targetMonth])
 
   const pl = useMemo(() => month ? calcPL(reports, month) : null, [reports, month])
   const daily = useMemo(() => month ? calcDailyPL(reports, month) : [], [reports, month])
-  if (!pl) return null
+  const bg = useMemo(() => month ? calcBudget(reports, budget, month, todayIso) : null, [reports, budget, month, todayIso])
+  if (!pl || !bg) return null
 
   const maxExpense = Math.max(1, ...pl.expenseByCategory.map(e => e.amount))
   const profitable = pl.profit >= 0
@@ -85,7 +122,39 @@ export default function PL() {
                 <div className="mt-1">{pl.daysWithData}日分のデータ</div>
               </div>
             </div>
+            {bg.hasBudget && bg.profitBudget !== 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
+                <span className="text-gray-500">目標損益 {fmt(bg.profitBudget)}</span>
+                <span className={`font-bold ${bg.profitDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {bg.profitDiff >= 0 ? '目標超過 +' : '目標まで '}{fmt(Math.abs(bg.profitDiff))}
+                </span>
+              </div>
+            )}
           </div>
+
+          {/* 予実サマリー（売上・費用の進捗。予算が入っているときだけ出す） */}
+          {bg.hasBudget && (
+            <div className="card mb-6">
+              <div className="flex items-baseline justify-between mb-3">
+                <span className="card-header mb-0">予実管理</span>
+                <span className="text-[11px] text-gray-400">
+                  {bg.elapsedDays}/{bg.totalDays}日経過（{Math.round(bg.paceRate * 100)}%）
+                </span>
+              </div>
+              <div className="space-y-3">
+                <ProgressRow label="売上" actual={bg.revenueActual} plan={bg.revenueBudget}
+                  rate={bg.revenueRate} paceRate={bg.paceRate} color="bg-blue-600" behindIsBad/>
+                <ProgressRow label="費用" actual={bg.expenseActual} plan={bg.expenseBudget}
+                  rate={bg.expenseRate} paceRate={bg.paceRate} color="bg-orange-500"/>
+              </div>
+              {bg.dailyRevenueTarget > 0 && (
+                <p className="text-[11px] text-gray-400 mt-3">
+                  1日あたり売上目標 {fmt(bg.dailyRevenueTarget)}
+                  {bg.elapsedDays > 0 && ` ／ 現在の日平均 ${fmt(Math.round(bg.revenueActual / bg.elapsedDays))}`}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {/* 売上高 */}
@@ -120,18 +189,38 @@ export default function PL() {
               <p className="section-header">費用の部（仕入・経費・人件費）</p>
               <div className="card">
                 <div className="space-y-2">
-                  {pl.expenseByCategory.map(e => (
+                  {bg.expenseLines.map(e => (
                     <div key={e.category}>
-                      <div className="flex justify-between text-sm mb-0.5">
-                        <span className="text-gray-600">{e.label}</span>
-                        <span className="font-bold text-gray-700">{fmt(e.amount)}</span>
+                      <div className="flex items-baseline justify-between text-sm mb-0.5 gap-2">
+                        <span className="text-gray-600 shrink-0">{e.label}</span>
+                        <span className="flex items-baseline gap-2">
+                          {e.budget > 0 && (
+                            <span className={`text-[11px] ${isOverPace(e.rate, bg.paceRate) ? 'text-red-500 font-bold' : 'text-gray-400'}`}>
+                              予算 {fmtShort(e.budget)}／{Math.round((e.rate ?? 0) * 100)}%
+                            </span>
+                          )}
+                          <span className="font-bold text-gray-700">{fmt(e.actual)}</span>
+                        </span>
                       </div>
-                      <div className="h-1.5 bg-gray-100 rounded overflow-hidden">
-                        <div className={`h-full ${CATEGORY_COLOR[e.category]} rounded`} style={{ width: `${(e.amount / maxExpense) * 100}%` }}/>
+                      <div className="h-1.5 bg-gray-100 rounded overflow-hidden relative">
+                        <div className={`h-full ${CATEGORY_COLOR[e.category]} rounded`}
+                          style={{ width: `${Math.min(100, (e.actual / (e.budget > 0 ? e.budget : maxExpense)) * 100)}%` }}/>
+                        {/* 予算がある場合は、今日時点であるべきペースの位置に目印を出す */}
+                        {e.budget > 0 && bg.paceRate > 0 && bg.paceRate < 1 && (
+                          <div className="absolute top-0 h-full w-px bg-gray-500/60" style={{ left: `${bg.paceRate * 100}%` }}/>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
+                {bg.hasBudget && bg.expenseBudget > 0 && (
+                  <div className="flex justify-between mt-3 pt-2 border-t border-gray-100 text-xs">
+                    <span className="text-gray-500">費用予算</span>
+                    <span className={bg.expenseBudget - bg.expenseActual >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                      {fmt(bg.expenseBudget)}（残り {fmt(bg.expenseBudget - bg.expenseActual)}）
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between mt-3 pt-3 border-t-2 border-gray-200">
                   <span className="font-bold">費用合計（税込）</span>
                   <span className="font-black">{fmt(pl.expenseTotal)}</span>

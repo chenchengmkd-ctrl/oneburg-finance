@@ -1,4 +1,4 @@
-import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate } from '../types'
+import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate, MonthBudget, BudgetSet } from '../types'
 import { DEFAULT_TAX_RATE, EXPENSE_CATEGORY_LABEL } from '../types'
 import { supabase } from './supabaseClient'
 
@@ -57,6 +57,19 @@ export const migrateReport = (raw: any): BalanceReport => ({
   shifts: Array.isArray(raw.shifts) ? raw.shifts.map(migrateShift) : [],
 })
 
+// 同じキーへの書き込みを直列化する。入力欄を続けて編集すると upsert が同時に飛び、
+// サーバーへの到着順が前後して古い値が新しい値を上書きすることがあるため
+const writeQueue = new Map<string, Promise<unknown>>()
+
+const enqueueWrite = (key: string, run: () => Promise<void>): Promise<void> => {
+  const prev = writeQueue.get(key) ?? Promise.resolve()
+  const next = prev.catch(() => {}).then(run)
+  writeQueue.set(key, next)
+  // 直列の鎖が伸び続けないよう、自分が最後なら片付ける
+  next.catch(() => {}).finally(() => { if (writeQueue.get(key) === next) writeQueue.delete(key) })
+  return next
+}
+
 // Supabase（birdmen_kvテーブル）をkey/valueストアとして使う。キー形式は旧localStorage版と同じ「birdmen:xxx」を踏襲
 export const storage = {
   async get<T>(key: string): Promise<T | null> {
@@ -65,8 +78,10 @@ export const storage = {
     return (data?.value as T) ?? null
   },
   async set<T>(key: string, value: T): Promise<void> {
-    const { error } = await supabase.from(TABLE).upsert({ key: PREFIX + key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
-    if (error) console.error('storage.set error', error)
+    return enqueueWrite(key, async () => {
+      const { error } = await supabase.from(TABLE).upsert({ key: PREFIX + key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+      if (error) console.error('storage.set error', error)
+    })
   },
   async remove(key: string): Promise<void> {
     const { error } = await supabase.from(TABLE).delete().eq('key', PREFIX + key)
@@ -236,6 +251,42 @@ export const defaultStaff = (): Staff[] => [
   { id: 'kudo',   name: '工藤香菜', hourlyWage: 1500, transport: 0 },
   { id: 'uehara', name: '上原敦子', hourlyWage: 1500, transport: 356 },
 ]
+
+// 予算の初期値。すべて0＝未設定（設定画面で入れるまで予実は表示しない）
+export const emptyMonthBudget = (): MonthBudget => ({
+  revenue: 0,
+  dailyRevenue: 0,
+  expenses: { ingredient: 0, supplies: 0, labor: 0, rent: 0, utility: 0, other: 0 },
+})
+
+export const defaultBudgetSet = (): BudgetSet => ({ default: emptyMonthBudget(), months: {} })
+
+// 保存形式が古い／壊れていても落ちないように正規化する
+export const migrateBudgetSet = (raw: any): BudgetSet => {
+  if (!raw) return defaultBudgetSet()
+  const norm = (b: any): MonthBudget => {
+    const base = emptyMonthBudget()
+    if (!b) return base
+    const expenses = { ...base.expenses }
+    for (const cat of ALL_CATEGORIES) expenses[cat] = Number(b.expenses?.[cat]) || 0
+    return { revenue: Number(b.revenue) || 0, dailyRevenue: Number(b.dailyRevenue) || 0, expenses }
+  }
+  const months: Record<string, Partial<MonthBudget>> = {}
+  for (const [k, v] of Object.entries(raw.months ?? {})) months[k] = norm(v)
+  return { default: norm(raw.default), months }
+}
+
+// 指定月に適用される予算（月別の上書きがあればそれ、無ければ既定）
+export const budgetFor = (set: BudgetSet, month: string): MonthBudget => {
+  const base = set.default ?? emptyMonthBudget()
+  const over = set.months?.[month]
+  if (!over) return base
+  return {
+    revenue: over.revenue ?? base.revenue,
+    dailyRevenue: over.dailyRevenue ?? base.dailyRevenue,
+    expenses: { ...base.expenses, ...(over.expenses ?? {}) },
+  }
+}
 
 // デフォルト設定：対象月は常に今月
 const currentMonthStr = () => {

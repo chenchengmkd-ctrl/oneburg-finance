@@ -22,6 +22,12 @@ export const calcRepaymentDate = (
 
 export const WD_JP = ['日', '月', '火', '水', '木', '金', '土']
 
+// 今日の日付（YYYY-MM-DD、ローカル時刻基準）
+export const todayStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export const getDayOfWeek = (dateStr: string) => {
   const d = new Date(dateStr)
   return WD_JP[d.getDay()]

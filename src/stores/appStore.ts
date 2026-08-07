@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet } from '../types'
-import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, migrateReport } from '../utils/storage'
+import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet } from '../types'
+import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, migrateReport } from '../utils/storage'
 
 interface AppState {
   // 現在のページ
@@ -38,6 +38,11 @@ interface AppState {
   itemLabels: ItemLabelSet
   loadItemLabels: () => Promise<void>
   saveItemLabels: (data: ItemLabelSet) => Promise<void>
+
+  // 予算（予実管理）
+  budget: BudgetSet
+  loadBudget: () => Promise<void>
+  saveBudget: (data: BudgetSet) => Promise<void>
 
   // 選択中の日付
   selectedDate: string
@@ -139,5 +144,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveItemLabels: async (data) => {
     set({ itemLabels: data })
     await storage.set('item-labels', data)
+  },
+
+  budget: defaultBudgetSet(),
+  loadBudget: async () => {
+    const raw = await storage.get<unknown>('budget')
+    set({ budget: raw ? migrateBudgetSet(raw) : defaultBudgetSet() })
+  },
+  saveBudget: async (data) => {
+    set({ budget: data })
+    await storage.set('budget', data)
   },
 }))

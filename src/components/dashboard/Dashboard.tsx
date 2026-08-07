@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores/appStore'
 import { fmt, fmtShort } from '../../utils/calculations'
 import { buildReportSeries, projectReal, tomorrowStr } from '../../utils/reportCalc'
 import { upcomingPayments, netCashflow } from '../../utils/paymentCalc'
+import { calcBudget, isOverPace, isBehindPace } from '../../utils/budgetCalc'
 import { Building2, User, Wallet, Coins, TrendingUp, TrendingDown, CalendarClock, Landmark } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -21,8 +22,36 @@ const AmountCard = ({ label, amount, sub, color, icon: Icon }: {
   </div>
 )
 
+// 予実の進捗バー。実績バーの上に「今日時点であるべきペース」の線を出す
+function BudgetBar({ label, actual, plan, rate, paceRate, color, behindIsBad }: {
+  label: string; actual: number; plan: number
+  rate: number | null; paceRate: number; color: string; behindIsBad?: boolean
+}) {
+  if (plan <= 0) return null
+  const pctVal = Math.round((rate ?? 0) * 100)
+  const bad = behindIsBad ? isBehindPace(rate, paceRate) : isOverPace(rate, paceRate)
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-sm mb-1">
+        <span className="text-gray-600">{label}</span>
+        <span className="flex items-baseline gap-2">
+          <span className={`text-[11px] ${bad ? 'text-red-500 font-bold' : 'text-gray-400'}`}>{pctVal}%</span>
+          <span className="font-bold text-gray-700">{fmtShort(actual)}</span>
+          <span className="text-[11px] text-gray-400">／ {fmtShort(plan)}</span>
+        </span>
+      </div>
+      <div className="h-2 bg-gray-100 rounded overflow-hidden relative">
+        <div className={`h-full ${color} rounded`} style={{ width: `${Math.min(100, pctVal)}%` }}/>
+        {paceRate > 0 && paceRate < 1 && (
+          <div className="absolute top-0 h-full w-px bg-gray-600/70" style={{ left: `${paceRate * 100}%` }}/>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
-  const { settings, reports, loans, payments, loadSettings, loadReports, loadLoans, loadPayments, setPage } = useAppStore()
+  const { settings, reports, loans, payments, budget, loadSettings, loadReports, loadLoans, loadPayments, loadBudget, setPage } = useAppStore()
   const today = new Date()
   const month = settings.targetMonth || `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 
@@ -31,9 +60,11 @@ export default function Dashboard() {
     loadReports()
     loadLoans()
     loadPayments()
+    loadBudget()
   }, [])
 
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const bg = useMemo(() => calcBudget(reports, budget, month, todayStr), [reports, budget, month, todayStr])
 
   const series = useMemo(() => buildReportSeries(reports), [reports])
   const monthSeries = series.filter(s => s.date.startsWith(month))
@@ -113,6 +144,30 @@ export default function Dashboard() {
               </div>
             </button>
           </div>
+
+          {/* 予実の進捗（予算が入っているときだけ出す） */}
+          {bg.hasBudget && (
+            <button onClick={() => setPage('pl')}
+              className="card w-full text-left mb-4 hover:bg-gray-50 transition">
+              <div className="flex items-baseline justify-between mb-3">
+                <span className="card-header mb-0">予算の進捗</span>
+                <span className="text-[11px] text-gray-400">
+                  {bg.elapsedDays}/{bg.totalDays}日経過（{Math.round(bg.paceRate * 100)}%）
+                </span>
+              </div>
+              <div className="space-y-3">
+                <BudgetBar label="売上" actual={bg.revenueActual} plan={bg.revenueBudget}
+                  rate={bg.revenueRate} paceRate={bg.paceRate} color="bg-blue-600" behindIsBad/>
+                <BudgetBar label="費用" actual={bg.expenseActual} plan={bg.expenseBudget}
+                  rate={bg.expenseRate} paceRate={bg.paceRate} color="bg-orange-500"/>
+              </div>
+              {bg.dailyRevenueTarget > 0 && bg.elapsedDays > 0 && (
+                <p className="text-[11px] text-gray-400 mt-3">
+                  1日の売上目標 {fmtShort(bg.dailyRevenueTarget)} ／ 日平均 {fmtShort(Math.round(bg.revenueActual / bg.elapsedDays))}
+                </p>
+              )}
+            </button>
+          )}
 
           {/* 資産推移チャート */}
           <div className="card mb-4">

@@ -59,6 +59,19 @@ export interface LabelDef {
   taxRate: TaxRate
 }
 
+// 予算（予実管理）。金額はすべて税込＝実績（LineItem.amount）と同じ土俵で比較する
+export interface MonthBudget {
+  revenue: number                             // 月の売上目標
+  dailyRevenue: number                        // 1日あたりの売上目標（0なら月次目標÷その月の日数で自動計算）
+  expenses: Record<ExpenseCategory, number>   // カテゴリ別の月次費用予算
+}
+
+// default＝毎月の既定値、months＝特定月だけの上書き（例：12月は売上目標を上げる）
+export interface BudgetSet {
+  default: MonthBudget
+  months: Record<string, Partial<MonthBudget>>
+}
+
 // 仕入れ先・品目の候補マスタ（カテゴリ別。設定画面で編集可能）
 export interface ItemLabelSet {
   vendors: Record<ExpenseCategory, string[]>
