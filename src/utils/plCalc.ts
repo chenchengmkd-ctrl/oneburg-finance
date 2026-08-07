@@ -17,17 +17,12 @@ export interface PLLedgerRow {
   category: ExpenseCategory
 }
 
-export interface PLLabelBreakdownItem {
-  label: string
+// 仕入れ先別／品目別の集計行
+export interface PLGroupRow {
+  key: string             // 仕入れ先名 または 品目名
   amount: number
   count: number
-}
-
-export interface PLLabelBreakdown {
-  category: ExpenseCategory
-  categoryLabel: string
-  total: number
-  items: PLLabelBreakdownItem[]  // 金額の大きい順
+  category: ExpenseCategory  // 金額が最も大きいカテゴリ（表示のタグ・色に使う）
 }
 
 export interface PLResult {
@@ -41,7 +36,6 @@ export interface PLResult {
   expenseTax: number      // 支出に含まれる消費税（仕入税額）
   profit: number          // 損益 = 収入合計 − 支出合計
   ledger: PLLedgerRow[]   // 全引出明細（日付順）
-  labelBreakdown: PLLabelBreakdown[]  // カテゴリ×項目名別の内訳（「肉のハナマサ」ではなく「日本酒」「お米」等、実際に何にコストをかけたか把握する用）
   daysWithData: number
 }
 
@@ -115,29 +109,33 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
   const revenueTotal = cashSales + corpDeposit + persDeposit
   const expenseTotal = Object.values(expenseMap).reduce((s, v) => s + v, 0)
 
-  const labelBreakdown = calcLabelBreakdown(ledger)
-
   return {
     month, cashSales, corpDeposit, persDeposit, revenueTotal,
     expenseByCategory, expenseTotal, expenseTax, profit: revenueTotal - expenseTotal,
     ledger: ledger.sort((a, b) => a.date.localeCompare(b.date)),
-    labelBreakdown,
     daysWithData: dates.length,
   }
 }
 
-// 引出明細をカテゴリ×項目名で集計する（同じ項目名は合算・件数もカウント。金額の大きい順）
-const calcLabelBreakdown = (ledger: PLLedgerRow[]): PLLabelBreakdown[] => {
-  const categories = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
-  return categories.map(category => {
-    const byLabel = new Map<string, PLLabelBreakdownItem>()
-    for (const row of ledger) {
-      if (row.category !== category) continue
-      const existing = byLabel.get(row.label)
-      if (existing) { existing.amount += row.amount; existing.count += 1 }
-      else byLabel.set(row.label, { label: row.label, amount: row.amount, count: 1 })
-    }
-    const items = [...byLabel.values()].sort((a, b) => b.amount - a.amount)
-    return { category, categoryLabel: EXPENSE_CATEGORY_LABEL[category], total: items.reduce((s, i) => s + i.amount, 0), items }
-  })
+export const UNSET_KEY = '（未設定）'
+
+// 引出明細を任意のキー（仕入れ先／品目）で合算する。同じキーは合算し件数も数える。金額の大きい順。
+// キーが空の明細は「（未設定）」にまとめる（仕入れ先を付けずに入力した行など）
+export const groupLedger = (ledger: PLLedgerRow[], pick: (row: PLLedgerRow) => string): PLGroupRow[] => {
+  const map = new Map<string, { amount: number; count: number; byCat: Partial<Record<ExpenseCategory, number>> }>()
+  for (const row of ledger) {
+    const key = pick(row).trim() || UNSET_KEY
+    const cur = map.get(key) ?? { amount: 0, count: 0, byCat: {} }
+    cur.amount += row.amount
+    cur.count += 1
+    cur.byCat[row.category] = (cur.byCat[row.category] ?? 0) + row.amount
+    map.set(key, cur)
+  }
+  return [...map.entries()]
+    .map(([key, v]) => {
+      // 同じ品目でもカテゴリが混ざりうるので、金額の大きいカテゴリを代表として持たせる
+      const top = (Object.entries(v.byCat) as [ExpenseCategory, number][]).sort((a, b) => b[1] - a[1])[0]
+      return { key, amount: v.amount, count: v.count, category: top?.[0] ?? 'other' }
+    })
+    .sort((a, b) => b.amount - a.amount)
 }

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import { fmt, fmtShort, todayStr } from '../../utils/calculations'
-import { calcPL, calcDailyPL, PL_BUCKET_LABEL } from '../../utils/plCalc'
+import { calcPL, calcDailyPL, groupLedger, PL_BUCKET_LABEL, UNSET_KEY } from '../../utils/plCalc'
+import type { PLGroupRow, PLLedgerRow } from '../../utils/plCalc'
 import { calcBudget, isOverPace, isBehindPace } from '../../utils/budgetCalc'
 import { downloadCsv } from '../../utils/csvExport'
 import { EXPENSE_CATEGORY_LABEL } from '../../types'
 import type { ExpenseCategory } from '../../types'
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Download } from 'lucide-react'
+import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Download, X } from 'lucide-react'
 
 const CATEGORY_COLOR: Record<string, string> = {
   ingredient: 'bg-red-500',
@@ -53,6 +54,45 @@ function ProgressRow({ label, actual, plan, rate, paceRate, color, behindIsBad }
   )
 }
 
+// 仕入れ先別／品目別の集計カード。行をクリックすると、もう片方のカードがその内訳に絞り込まれる
+function GroupCard({ title, note, rows, selected, onSelect }: {
+  title: string; note?: string; rows: PLGroupRow[]
+  selected: string | null; onSelect: (key: string) => void
+}) {
+  const total = rows.reduce((s, r) => s + r.amount, 0)
+  const max = Math.max(1, ...rows.map(r => r.amount))
+  return (
+    <div className="card">
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="card-header mb-0">{title}<span className="ml-1.5 text-gray-300 font-normal">{rows.length}件</span></span>
+        <span className="text-sm font-black text-gray-700">{fmt(total)}</span>
+      </div>
+      {note && <p className="text-[11px] text-blue-600 mb-1.5">{note}</p>}
+      {rows.length === 0 ? (
+        <div className="text-xs text-gray-400 py-3 text-center">データがありません</div>
+      ) : (
+        <div className="space-y-1 max-h-[22rem] overflow-y-auto pr-1">
+          {rows.map(r => (
+            <button key={r.key} onClick={() => onSelect(r.key)}
+              className={`w-full text-left rounded px-1.5 py-1 transition ${selected === r.key ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-gray-50'}`}>
+              <div className="flex items-baseline gap-2 text-xs mb-0.5">
+                <span className={`flex-1 truncate ${r.key === UNSET_KEY ? 'text-gray-400' : 'text-gray-700'}`}>{r.key}</span>
+                <span className="text-[10px] text-gray-400 shrink-0">
+                  {r.count > 1 && `×${r.count} `}{total > 0 ? `${Math.round((r.amount / total) * 100)}%` : ''}
+                </span>
+                <span className="font-bold text-gray-700 shrink-0">{fmt(r.amount)}</span>
+              </div>
+              <div className="h-1 bg-gray-100 rounded overflow-hidden">
+                <div className={`h-full ${CATEGORY_COLOR[r.category]} rounded`} style={{ width: `${(r.amount / max) * 100}%` }}/>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const shiftMonth = (month: string, delta: number) => {
   const [y, m] = month.split('-').map(Number)
   const d = new Date(y, m - 1 + delta, 1)
@@ -60,16 +100,43 @@ const shiftMonth = (month: string, delta: number) => {
 }
 
 export default function PL() {
-  const { reports, loadReports, settings, loadSettings, budget, loadBudget } = useAppStore()
+  const { reports, loadReports, settings, loadSettings, budget, loadBudget, itemLabels, loadItemLabels } = useAppStore()
   const [month, setMonth] = useState('')
+  // 仕入れ先別／品目別の絞り込み。どちらか片方だけを選ぶ（選ぶともう片方がその内訳になる）
+  const [focus, setFocus] = useState<{ type: 'vendor' | 'item'; key: string } | null>(null)
   const todayIso = todayStr()
 
-  useEffect(() => { loadReports(); loadSettings(); loadBudget() }, [])
+  useEffect(() => { loadReports(); loadSettings(); loadBudget(); loadItemLabels() }, [])
   useEffect(() => { if (!month && settings.targetMonth) setMonth(settings.targetMonth) }, [settings.targetMonth])
+  useEffect(() => { setFocus(null) }, [month])
 
   const pl = useMemo(() => month ? calcPL(reports, month) : null, [reports, month])
   const daily = useMemo(() => month ? calcDailyPL(reports, month) : [], [reports, month])
   const bg = useMemo(() => month ? calcBudget(reports, budget, month, todayIso) : null, [reports, budget, month, todayIso])
+
+  // 人件費はシフトから自動生成される明細で仕入れ先・品目の概念がないため、この集計からは外す。
+  // 0円の行は入力途中の空枠なので同じく除外する
+  const purchases = useMemo(() => (pl?.ledger ?? []).filter(r => r.category !== 'labor' && r.amount !== 0), [pl])
+
+  // 仕入れ先マスタ＋実際に使った仕入れ先名の一覧
+  const knownVendors = useMemo(() => {
+    const s = new Set<string>()
+    for (const cat of EXPENSE_CATEGORIES) for (const v of itemLabels.vendors[cat]) if (v.trim()) s.add(v.trim())
+    for (const r of purchases) if (r.vendor.trim()) s.add(r.vendor.trim())
+    return s
+  }, [itemLabels, purchases])
+
+  // 仕入れ先欄ができる前（〜2026-08-05）のデータは店名を品目名の欄に書いていたので、
+  // 仕入れ先が空でも品目名が既知の仕入れ先と一致すればその仕入れ先として数える
+  const vendorOf = (r: PLLedgerRow) => r.vendor.trim() || (knownVendors.has(r.label.trim()) ? r.label.trim() : '')
+  const keyOf = (v: string) => v.trim() || UNSET_KEY
+  const vendorRows = useMemo(() => groupLedger(
+    focus?.type === 'item' ? purchases.filter(r => keyOf(r.label) === focus.key) : purchases, vendorOf
+  ), [purchases, focus, knownVendors])
+  const itemRows = useMemo(() => groupLedger(
+    focus?.type === 'vendor' ? purchases.filter(r => keyOf(vendorOf(r)) === focus.key) : purchases, r => r.label
+  ), [purchases, focus, knownVendors])
+
   if (!pl || !bg) return null
 
   const maxExpense = Math.max(1, ...pl.expenseByCategory.map(e => e.amount))
@@ -82,6 +149,16 @@ export default function PL() {
     ])
     const total = ['合計', pl.revenueTotal, ...EXPENSE_CATEGORIES.map(c => pl.expenseByCategory.find(e => e.category === c)?.amount ?? 0), pl.expenseTotal, pl.profit]
     downloadCsv(`損益表_日報_${month}.csv`, [header, ...rows, total])
+  }
+
+  const exportGroupCsv = () => {
+    const header = ['集計', '名前', '金額', '件数']
+    const rows = [
+      ...vendorRows.map(r => ['仕入れ先', r.key, r.amount, r.count]),
+      ...itemRows.map(r => ['品目', r.key, r.amount, r.count]),
+    ]
+    const suffix = focus ? `_${focus.key}` : ''
+    downloadCsv(`損益表_仕入れ先品目別_${month}${suffix}.csv`, [header, ...rows])
   }
 
   const exportLedgerCsv = () => {
@@ -237,35 +314,36 @@ export default function PL() {
             </div>
           </div>
 
-          {/* 品目別内訳：どの店にいくら、ではなく何にコストをかけているかを見る */}
-          {pl.labelBreakdown.some(c => c.items.length > 0) && (
+          {/* 仕入れ先別・品目別：どの店にいくら使ったか／何にいくら使ったかを別々に集計する */}
+          {purchases.length > 0 && (
             <>
-              <p className="section-header mt-6">品目別内訳</p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                {pl.labelBreakdown.filter(c => c.items.length > 0).map(cat => {
-                  const catMax = Math.max(1, ...cat.items.map(i => i.amount))
-                  return (
-                    <div key={cat.category} className="card">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-gray-500">{cat.categoryLabel}</span>
-                        <span className="text-xs font-black text-gray-700">{fmt(cat.total)}</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {cat.items.map(item => (
-                          <div key={item.label}>
-                            <div className="flex items-center gap-2 text-xs mb-0.5">
-                              <span className="flex-1 truncate text-gray-600">{item.label}{item.count > 1 ? ` ×${item.count}` : ''}</span>
-                              <span className="font-bold text-gray-700 shrink-0">{fmtShort(item.amount)}</span>
-                            </div>
-                            <div className="h-1 bg-gray-100 rounded overflow-hidden">
-                              <div className={`h-full ${CATEGORY_COLOR[cat.category]} rounded`} style={{ width: `${(item.amount / catMax) * 100}%` }}/>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
+              <div className="flex items-center justify-between mt-6">
+                <p className="section-header mb-0">仕入れ先別・品目別の集計</p>
+                <div className="flex items-center gap-2">
+                  {focus && (
+                    <button onClick={() => setFocus(null)}
+                      className="flex items-center gap-1 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1 hover:bg-blue-100">
+                      {focus.key} で絞り込み中 <X size={12}/>
+                    </button>
+                  )}
+                  <button onClick={exportGroupCsv}
+                    className="flex items-center gap-1 text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">
+                    <Download size={12}/> CSVダウンロード
+                  </button>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1 mb-2">
+                行をクリックすると、もう片方がその内訳だけになります（人件費は除く）
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <GroupCard title="仕入れ先別" rows={vendorRows}
+                  note={focus?.type === 'item' ? `「${focus.key}」を買った仕入れ先` : undefined}
+                  selected={focus?.type === 'vendor' ? focus.key : null}
+                  onSelect={key => setFocus(f => f?.type === 'vendor' && f.key === key ? null : { type: 'vendor', key })}/>
+                <GroupCard title="品目別" rows={itemRows}
+                  note={focus?.type === 'vendor' ? `「${focus.key}」で買ったもの` : undefined}
+                  selected={focus?.type === 'item' ? focus.key : null}
+                  onSelect={key => setFocus(f => f?.type === 'item' && f.key === key ? null : { type: 'item', key })}/>
               </div>
             </>
           )}
