@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet } from '../types'
-import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, migrateReport } from '../utils/storage'
+import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern } from '../types'
+import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, defaultShiftPattern, migrateShiftPattern, migrateReport } from '../utils/storage'
 
 interface AppState {
   // 現在のページ
@@ -43,6 +43,11 @@ interface AppState {
   budget: BudgetSet
   loadBudget: () => Promise<void>
   saveBudget: (data: BudgetSet) => Promise<void>
+
+  // シフトの曜日パターン
+  shiftPattern: ShiftPattern
+  loadShiftPattern: () => Promise<void>
+  saveShiftPattern: (data: ShiftPattern) => Promise<void>
 
   // 選択中の日付
   selectedDate: string
@@ -154,5 +159,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveBudget: async (data) => {
     set({ budget: data })
     await storage.set('budget', data)
+  },
+
+  shiftPattern: defaultShiftPattern(),
+  loadShiftPattern: async () => {
+    const raw = await storage.get<unknown>('shift-pattern')
+    set({ shiftPattern: raw ? migrateShiftPattern(raw) : defaultShiftPattern() })
+  },
+  saveShiftPattern: async (data) => {
+    set({ shiftPattern: data })
+    await storage.set('shift-pattern', data)
   },
 }))

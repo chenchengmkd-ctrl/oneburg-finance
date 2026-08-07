@@ -97,10 +97,10 @@ export default function Dashboard() {
 
       {!latest ? (
         <div className="card text-center py-12">
-          <p className="text-gray-500 mb-3">まだ残高報告が入力されていません</p>
-          <button onClick={() => setPage('report')}
+          <p className="text-gray-500 mb-3">まだ入力がありません</p>
+          <button onClick={() => setPage('daily')}
             className="bg-blue-700 text-white px-5 py-2 rounded-lg font-bold hover:bg-blue-800 transition">
-            残高報告を入力する
+            日次入力へ
           </button>
         </div>
       ) : (

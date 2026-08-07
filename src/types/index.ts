@@ -60,10 +60,13 @@ export interface LabelDef {
 }
 
 // 予算（予実管理）。金額はすべて税込＝実績（LineItem.amount）と同じ土俵で比較する
+// 曜日別を入れた場合は「曜日別 × その月の該当曜日数」を積み上げて月次目標にする（曜日別が優先）
 export interface MonthBudget {
-  revenue: number                             // 月の売上目標
-  dailyRevenue: number                        // 1日あたりの売上目標（0なら月次目標÷その月の日数で自動計算）
-  expenses: Record<ExpenseCategory, number>   // カテゴリ別の月次費用予算
+  revenue: number                             // 月の売上目標（曜日別が未設定のときに使う）
+  dailyRevenue: number                        // 1日あたりの売上目標（0なら月次目標÷その月の日数）
+  weekdayRevenue: number[]                    // 曜日別の売上目標。index 0=日 … 6=土。全部0なら未設定
+  weekdayLabor: number[]                      // 曜日別の人件費予算。index 0=日 … 6=土。全部0なら未設定
+  expenses: Record<ExpenseCategory, number>   // カテゴリ別の月次費用予算（laborは曜日別が入っていればそちらが優先）
 }
 
 // default＝毎月の既定値、months＝特定月だけの上書き（例：12月は売上目標を上げる）
@@ -128,6 +131,18 @@ export interface Staff {
   hourlyWage: number
   transport: number  // 1回の出勤あたりの交通費
 }
+
+// シフトの曜日パターン（「毎週土曜は都丸が10:00〜15:00」のような定型）
+// これを月にまとめて適用してシフト表を一気に作る
+export interface ShiftPatternEntry {
+  id: string
+  staffName: string
+  clockIn: string
+  clockOut: string
+}
+
+// index 0=日 … 6=土
+export type ShiftPattern = Record<number, ShiftPatternEntry[]>
 
 // 出勤シフト1件（誰が・何時から何時まで働いたか）
 // 労働時間はclockIn/clockOutから自動計算、日給 = 時間 × hourlyWage + transport

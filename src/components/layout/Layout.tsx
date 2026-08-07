@@ -1,11 +1,12 @@
 import { useAppStore } from '../../stores/appStore'
-import { LayoutDashboard, NotebookPen, ClipboardList, Landmark, BarChart3, Settings } from 'lucide-react'
+import { LayoutDashboard, NotebookPen, Landmark, BarChart3, Settings } from 'lucide-react'
 
+// 残高報告タブは廃止（2026-08-06）。日次入力に一本化した。
+// データ構造（BalanceReport）はそのまま使い続けているので、過去の入力も損益表・ダッシュボードに反映される。
 const NAV = [
   { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
   { id: 'daily',     label: '日次入力',       icon: NotebookPen },
   { id: 'pl',        label: '損益表',         icon: BarChart3 },
-  { id: 'report',    label: '残高報告',       icon: ClipboardList },
   { id: 'payments',  label: '資金繰り',       icon: Landmark },
   { id: 'settings',  label: '設定',           icon: Settings },
 ]

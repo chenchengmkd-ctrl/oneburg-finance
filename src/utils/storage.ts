@@ -1,4 +1,4 @@
-import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate, MonthBudget, BudgetSet } from '../types'
+import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate, MonthBudget, BudgetSet, ShiftPattern, ShiftPatternEntry } from '../types'
 import { DEFAULT_TAX_RATE, EXPENSE_CATEGORY_LABEL } from '../types'
 import { supabase } from './supabaseClient'
 
@@ -256,6 +256,8 @@ export const defaultStaff = (): Staff[] => [
 export const emptyMonthBudget = (): MonthBudget => ({
   revenue: 0,
   dailyRevenue: 0,
+  weekdayRevenue: [0, 0, 0, 0, 0, 0, 0],
+  weekdayLabor: [0, 0, 0, 0, 0, 0, 0],
   expenses: { ingredient: 0, supplies: 0, labor: 0, rent: 0, utility: 0, other: 0 },
 })
 
@@ -264,12 +266,23 @@ export const defaultBudgetSet = (): BudgetSet => ({ default: emptyMonthBudget(),
 // 保存形式が古い／壊れていても落ちないように正規化する
 export const migrateBudgetSet = (raw: any): BudgetSet => {
   if (!raw) return defaultBudgetSet()
+  const week = (v: any): number[] => {
+    const out = [0, 0, 0, 0, 0, 0, 0]
+    if (Array.isArray(v)) for (let i = 0; i < 7; i++) out[i] = Number(v[i]) || 0
+    return out
+  }
   const norm = (b: any): MonthBudget => {
     const base = emptyMonthBudget()
     if (!b) return base
     const expenses = { ...base.expenses }
     for (const cat of ALL_CATEGORIES) expenses[cat] = Number(b.expenses?.[cat]) || 0
-    return { revenue: Number(b.revenue) || 0, dailyRevenue: Number(b.dailyRevenue) || 0, expenses }
+    return {
+      revenue: Number(b.revenue) || 0,
+      dailyRevenue: Number(b.dailyRevenue) || 0,
+      weekdayRevenue: week(b.weekdayRevenue),
+      weekdayLabor: week(b.weekdayLabor),
+      expenses,
+    }
   }
   const months: Record<string, Partial<MonthBudget>> = {}
   for (const [k, v] of Object.entries(raw.months ?? {})) months[k] = norm(v)
@@ -284,9 +297,38 @@ export const budgetFor = (set: BudgetSet, month: string): MonthBudget => {
   return {
     revenue: over.revenue ?? base.revenue,
     dailyRevenue: over.dailyRevenue ?? base.dailyRevenue,
+    weekdayRevenue: over.weekdayRevenue ?? base.weekdayRevenue,
+    weekdayLabor: over.weekdayLabor ?? base.weekdayLabor,
     expenses: { ...base.expenses, ...(over.expenses ?? {}) },
   }
 }
+
+// シフトの曜日パターン（設定は「シフト作成」画面から）
+export const defaultShiftPattern = (): ShiftPattern => ({ 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] })
+
+export const migrateShiftPattern = (raw: any): ShiftPattern => {
+  const out = defaultShiftPattern()
+  if (!raw) return out
+  for (let dow = 0; dow < 7; dow++) {
+    const list = Array.isArray(raw[dow]) ? raw[dow] : []
+    out[dow] = list
+      .filter((e: any) => e && typeof e.staffName === 'string')
+      .map((e: any) => ({
+        id: e.id ?? newItemId(),
+        staffName: e.staffName,
+        clockIn: e.clockIn ?? '',
+        clockOut: e.clockOut ?? '',
+      }))
+  }
+  return out
+}
+
+export const newPatternEntry = (staff?: Staff): ShiftPatternEntry => ({
+  id: newItemId(),
+  staffName: staff?.name ?? '',
+  clockIn: '10:00',
+  clockOut: '14:30',
+})
 
 // デフォルト設定：対象月は常に今月
 const currentMonthStr = () => {

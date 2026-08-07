@@ -4,10 +4,11 @@ import { defaultReport, newShiftEntry, newLineItem, sumItems, sumNet, sumTax, su
 import { calcPL } from '../../utils/plCalc'
 import { fmt, fmtShort, fmtHours, getDayOfWeek, isWeekend } from '../../utils/calculations'
 import type { BalanceReport, ExpenseCategory, LineItem, ShiftEntry, LabelDef, TaxRate } from '../../types'
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, BarChart3, Plus, X, Users, ClipboardPaste, Pencil, List } from 'lucide-react'
+import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, BarChart3, Plus, X, Users, ClipboardPaste, Pencil, List, CalendarRange } from 'lucide-react'
 import NumberInput from '../common/NumberInput'
 import ShiftBulkImportModal from './ShiftBulkImportModal'
 import ShiftList from './ShiftList'
+import ShiftPlanner from './ShiftPlanner'
 
 function BigInput({ label, value, onChange, color }: {
   label: string; value: number; onChange: (v: number) => void; color: string
@@ -188,11 +189,11 @@ function QuickItemsCard({ title, color, category, items, labelDefs, vendorOption
 }
 
 export default function DailyEntry() {
-  const { reports, staff, itemLabels, loadReports, loadStaff, loadItemLabels, saveReport, loadSettings, selectedDate, setSelectedDate, setPage } = useAppStore()
+  const { reports, staff, itemLabels, loadReports, loadStaff, loadItemLabels, loadBudget, loadShiftPattern, saveReport, loadSettings, selectedDate, setSelectedDate, setPage } = useAppStore()
   const [showBulkImport, setShowBulkImport] = useState(false)
-  const [viewMode, setViewMode] = useState<'input' | 'list'>('input')
+  const [viewMode, setViewMode] = useState<'input' | 'plan' | 'list'>('input')
 
-  useEffect(() => { loadReports(); loadStaff(); loadSettings(); loadItemLabels() }, [])
+  useEffect(() => { loadReports(); loadStaff(); loadSettings(); loadItemLabels(); loadBudget(); loadShiftPattern() }, [])
 
   const report: BalanceReport = reports[selectedDate] ?? defaultReport(selectedDate)
   const month = selectedDate.slice(0, 7)
@@ -216,13 +217,14 @@ export default function DailyEntry() {
   const suppliesVendors = useMemo(() => usedVendors(reports, 'supplies', itemLabels.vendors.supplies), [reports, itemLabels])
   const otherVendors = useMemo(() => usedVendors(reports, 'other', itemLabels.vendors.other), [reports, itemLabels])
 
+  // 矢印を連打しても1回分しか進まないことがないよう、毎回ストアの最新日付を読み直す
   const changeDate = (delta: number) => {
-    const d = new Date(selectedDate)
+    const d = new Date(useAppStore.getState().selectedDate)
     d.setDate(d.getDate() + delta)
     setSelectedDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
   }
   const changeMonth = (delta: number) => {
-    const d = new Date(selectedDate)
+    const d = new Date(useAppStore.getState().selectedDate)
     d.setMonth(d.getMonth() + delta, 1)
     setSelectedDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`)
   }
@@ -252,7 +254,7 @@ export default function DailyEntry() {
   const monthProfitable = monthPL.profit >= 0
 
   return (
-    <div className={`p-4 sm:p-6 ${viewMode === 'list' ? 'max-w-3xl' : 'max-w-2xl'}`}>
+    <div className={`p-4 sm:p-6 ${viewMode === 'input' ? 'max-w-2xl' : 'max-w-3xl'}`}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           {viewMode === 'input' && (
@@ -262,9 +264,13 @@ export default function DailyEntry() {
             <h1 className="text-2xl font-bold text-gray-800">
               {viewMode === 'input'
                 ? <>{selectedDate}<span className={`ml-2 text-lg ${weekend ? 'text-red-500' : 'text-gray-400'}`}>({dayOfWeek})</span></>
-                : 'シフト一覧'}
+                : viewMode === 'plan' ? 'シフト作成' : 'シフト一覧'}
             </h1>
-            <p className="text-gray-400 text-sm">日次入力 ／ 売上・人件費・仕入だけを入力して損益を出す</p>
+            <p className="text-gray-400 text-sm">
+              {viewMode === 'plan'
+                ? '曜日パターンから1か月分のシフトを組み、人件費予算と見比べる'
+                : '日次入力 ／ 売上・人件費・仕入だけを入力して損益を出す'}
+            </p>
           </div>
           {viewMode === 'input' && (
             <>
@@ -280,6 +286,10 @@ export default function DailyEntry() {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'input' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
             <Pencil size={14}/> 入力
           </button>
+          <button onClick={() => setViewMode('plan')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'plan' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+            <CalendarRange size={14}/> シフト作成
+          </button>
           <button onClick={() => setViewMode('list')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'list' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
             <List size={14}/> シフト一覧
@@ -287,7 +297,10 @@ export default function DailyEntry() {
         </div>
       </div>
 
-      {viewMode === 'list' ? (
+      {viewMode === 'plan' ? (
+        <ShiftPlanner month={month} onChangeMonth={changeMonth}
+          onEditDate={(date) => { setSelectedDate(date); setViewMode('input') }}/>
+      ) : viewMode === 'list' ? (
         <ShiftList reports={reports} month={month} onChangeMonth={changeMonth}
           onEditDate={(date) => { setSelectedDate(date); setViewMode('input') }}/>
       ) : (

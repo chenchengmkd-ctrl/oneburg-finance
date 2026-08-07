@@ -2,13 +2,12 @@ import { useEffect } from 'react'
 import Layout from './components/layout/Layout'
 import Dashboard from './components/dashboard/Dashboard'
 import DailyEntry from './components/daily/DailyEntry'
-import Report from './components/report/Report'
 import Payments from './components/payments/Payments'
 import PL from './components/pl/PL'
 import SettingsPage from './components/layout/Settings'
 import { useAppStore } from './stores/appStore'
 
-const VALID_PAGES = ['dashboard', 'daily', 'report', 'payments', 'pl', 'settings']
+const VALID_PAGES = ['dashboard', 'daily', 'payments', 'pl', 'settings']
 
 export default function App() {
   const { currentPage, setPage, setSelectedDate } = useAppStore()
@@ -29,7 +28,6 @@ export default function App() {
   const PAGE: Record<string, React.ReactNode> = {
     dashboard: <Dashboard />,
     daily:     <DailyEntry />,
-    report:    <Report />,
     payments:  <Payments />,
     pl:        <PL />,
     settings:  <SettingsPage />,

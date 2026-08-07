@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import { storage } from '../../utils/storage'
 import { supabase } from '../../utils/supabaseClient'
 import { EXPENSE_CATEGORY_LABEL, DEFAULT_TAX_RATE } from '../../types'
 import type { ExpenseCategory, LabelDef, TaxRate, MonthBudget } from '../../types'
 import { emptyMonthBudget, budgetFor } from '../../utils/storage'
-import { fmt } from '../../utils/calculations'
+import { fmt, WD_JP } from '../../utils/calculations'
+import { weekdayCounts } from '../../utils/budgetCalc'
 import NumberInput from '../common/NumberInput'
 import { Plus, Trash2, UploadCloud } from 'lucide-react'
 
@@ -58,13 +59,22 @@ function VendorListEditor({ title, values, onChange }: {
 // 予算エディタ。金額はすべて税込（実績と同じ土俵で比べるため）
 // 変更は「差分（patch）」で親に渡す。全体を組み立てて渡すと、連続更新のときに
 // 古いvalueを元にした保存が新しい値を上書きしてしまうため
-function BudgetEditor({ value, onPatch, onPatchExpense, month, isDefault }: {
+function BudgetEditor({ value, onPatch, onPatchExpense, onPatchWeek, month, isDefault }: {
   value: MonthBudget
-  onPatch: (patch: Partial<Omit<MonthBudget, 'expenses'>>) => void
+  onPatch: (patch: Partial<Omit<MonthBudget, 'expenses' | 'weekdayRevenue' | 'weekdayLabor'>>) => void
   onPatchExpense: (cat: ExpenseCategory, v: number) => void
+  onPatchWeek: (field: 'weekdayRevenue' | 'weekdayLabor', dow: number, v: number) => void
   month: string; isDefault: boolean
 }) {
-  const expenseTotal = ALL_EXPENSE_CATEGORIES.reduce((s, c) => s + (value.expenses[c] ?? 0), 0)
+  const counts = weekdayCounts(month)
+  const weekRevTotal = value.weekdayRevenue.reduce((s, v, i) => s + v * counts[i], 0)
+  const weekLaborTotal = value.weekdayLabor.reduce((s, v, i) => s + v * counts[i], 0)
+  const usingWeekRev = value.weekdayRevenue.some(v => v > 0)
+  const usingWeekLabor = value.weekdayLabor.some(v => v > 0)
+  // 実際に予実で使われる値（曜日別が入っていればそちらが優先）
+  const effectiveRevenue = usingWeekRev ? weekRevTotal : value.revenue
+  const effectiveExpenseTotal = ALL_EXPENSE_CATEGORIES
+    .reduce((s, c) => s + (c === 'labor' && usingWeekLabor ? weekLaborTotal : (value.expenses[c] ?? 0)), 0)
   const days = (() => {
     const [y, m] = month.split('-').map(Number)
     return new Date(y, m, 0).getDate()
@@ -87,6 +97,33 @@ function BudgetEditor({ value, onPatch, onPatchExpense, month, isDefault }: {
         0のままなら「売上目標 ÷ {days}日 = {fmt(autoDaily)}」を自動で使います
       </p>
 
+      {/* 曜日別。1つでも入れるとこちらが優先され、月次目標は自動で積み上がる */}
+      <div className="pt-2 border-t border-gray-100">
+        <div className="text-xs font-bold text-gray-500 mb-1">曜日別の目標</div>
+        <p className="text-[11px] text-gray-400 mb-2">
+          1つでも入れると、上の月次目標より優先され「曜日別 × その月の曜日数」で月次目標を自動計算します
+        </p>
+        <div className="grid grid-cols-[2.5rem_1fr_1fr] gap-x-2 gap-y-1.5 items-center">
+          <span/>
+          <span className="text-[10px] text-gray-400 text-center">売上目標</span>
+          <span className="text-[10px] text-gray-400 text-center">人件費予算</span>
+          {WD_JP.map((wd, dow) => (
+            <Fragment key={dow}>
+              <span className={`text-xs font-bold ${dow === 0 ? 'text-red-500' : dow === 6 ? 'text-blue-500' : 'text-gray-500'}`}>
+                {wd}<span className="text-[10px] text-gray-300 font-normal"> ×{counts[dow]}</span>
+              </span>
+              <NumberInput value={value.weekdayRevenue[dow] ?? 0} onChange={v => onPatchWeek('weekdayRevenue', dow, v)}
+                className="w-full text-right text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+              <NumberInput value={value.weekdayLabor[dow] ?? 0} onChange={v => onPatchWeek('weekdayLabor', dow, v)}
+                className="w-full text-right text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+            </Fragment>
+          ))}
+          <span className="text-[10px] text-gray-400">月計</span>
+          <span className={`text-xs text-right font-bold ${usingWeekRev ? 'text-blue-700' : 'text-gray-300'}`}>{fmt(weekRevTotal)}</span>
+          <span className={`text-xs text-right font-bold ${usingWeekLabor ? 'text-purple-700' : 'text-gray-300'}`}>{fmt(weekLaborTotal)}</span>
+        </div>
+      </div>
+
       <div className="pt-2 border-t border-gray-100">
         <div className="text-xs font-bold text-gray-500 mb-2">費用予算（カテゴリ別・月）</div>
         <div className="space-y-2">
@@ -94,18 +131,28 @@ function BudgetEditor({ value, onPatch, onPatchExpense, month, isDefault }: {
             <div key={cat} className="flex items-center gap-2">
               <span className="text-xs text-gray-500 w-24 shrink-0">{EXPENSE_CATEGORY_LABEL[cat]}</span>
               <NumberInput value={value.expenses[cat] ?? 0} onChange={v => onPatchExpense(cat, v)}
-                className="flex-1 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+                className={`flex-1 text-right text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300
+                  ${cat === 'labor' && usingWeekLabor ? 'border-gray-100 text-gray-300' : 'border-gray-200'}`}/>
             </div>
           ))}
         </div>
+        {usingWeekLabor && (
+          <p className="text-[11px] text-gray-400 mt-1.5">
+            人件費は曜日別（月計 {fmt(weekLaborTotal)}）を使うため、上の欄は無視されます
+          </p>
+        )}
       </div>
 
       <div className="pt-2 border-t border-gray-100 space-y-1 text-xs">
-        <div className="flex justify-between"><span className="text-gray-500">費用予算 合計</span><span className="font-bold">{fmt(expenseTotal)}</span></div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">売上目標（月）</span>
+          <span className="font-bold">{fmt(effectiveRevenue)}</span>
+        </div>
+        <div className="flex justify-between"><span className="text-gray-500">費用予算 合計</span><span className="font-bold">{fmt(effectiveExpenseTotal)}</span></div>
         <div className="flex justify-between">
           <span className="text-gray-500">目標損益</span>
-          <span className={`font-black ${value.revenue - expenseTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {fmt(value.revenue - expenseTotal)}
+          <span className={`font-black ${effectiveRevenue - effectiveExpenseTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {fmt(effectiveRevenue - effectiveExpenseTotal)}
           </span>
         </div>
       </div>
@@ -201,6 +248,13 @@ export default function Settings() {
   const onPatchBudgetExpense = (cat: ExpenseCategory, v: number) =>
     patchBudget(cur => ({ ...cur, expenses: { ...cur.expenses, [cat]: v } }))
 
+  const onPatchBudgetWeek = (field: 'weekdayRevenue' | 'weekdayLabor', dow: number, v: number) =>
+    patchBudget(cur => {
+      const next = [...(cur[field] ?? [0, 0, 0, 0, 0, 0, 0])]
+      next[dow] = v
+      return { ...cur, [field]: next }
+    })
+
   const clearMonthOverride = () => {
     const months = { ...budget.months }
     delete months[targetMonth]
@@ -260,7 +314,7 @@ export default function Settings() {
           金額は税込で入れてください（実績と同じ土俵で比較します）。0のままの項目は予実に表示されません
         </p>
         <BudgetEditor value={editingBudget} onPatch={onPatchBudget} onPatchExpense={onPatchBudgetExpense}
-          month={targetMonth} isDefault={budgetScope === 'default'}/>
+          onPatchWeek={onPatchBudgetWeek} month={targetMonth} isDefault={budgetScope === 'default'}/>
         {budgetScope === 'month' && budget.months?.[targetMonth] && (
           <button onClick={clearMonthOverride}
             className="mt-3 text-[11px] text-gray-400 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">
