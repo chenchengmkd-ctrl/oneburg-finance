@@ -1,5 +1,5 @@
-import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate, MonthBudget, BudgetSet, ShiftPattern, ShiftPatternEntry } from '../types'
-import { DEFAULT_TAX_RATE, EXPENSE_CATEGORY_LABEL } from '../types'
+import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, CashDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate, MonthBudget, BudgetSet, ShiftPattern, ShiftPatternEntry } from '../types'
+import { DEFAULT_TAX_RATE, DEFAULT_SALES_TAX_RATE, EXPENSE_CATEGORY_LABEL } from '../types'
 import { supabase } from './supabaseClient'
 
 const ALL_CATEGORIES = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
@@ -21,6 +21,10 @@ export const itemTax = (item: LineItem) => item.amount - itemNet(item)
 
 export const sumNet = (items: LineItem[]) => items.reduce((s, i) => s + itemNet(i), 0)
 export const sumTax = (items: LineItem[]) => items.reduce((s, i) => s + itemTax(i), 0)
+
+// 売上の税率。日ごとに変更でき、未設定の過去データは既定の8%として扱う
+export const salesTaxRateOf = (cash: Pick<CashDay, 'salesTaxRate'>): TaxRate =>
+  cash.salesTaxRate ?? DEFAULT_SALES_TAX_RATE
 
 const PREFIX = 'birdmen:'
 const TABLE = 'birdmen_kv'
@@ -53,7 +57,7 @@ export const migrateReport = (raw: any): BalanceReport => ({
   ...raw,
   pers: migrateBucket(raw.pers),
   corp: migrateBucket(raw.corp),
-  cash: { ...migrateBucket(raw.cash), sales: raw.cash?.sales ?? 0, salesNote: raw.cash?.salesNote ?? '', toBank: raw.cash?.toBank ?? 0 },
+  cash: { ...migrateBucket(raw.cash), sales: raw.cash?.sales ?? 0, salesNote: raw.cash?.salesNote ?? '', salesTaxRate: raw.cash?.salesTaxRate, toBank: raw.cash?.toBank ?? 0 },
   shifts: Array.isArray(raw.shifts) ? raw.shifts.map(migrateShift) : [],
 })
 

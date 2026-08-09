@@ -43,6 +43,9 @@ export type ExpenseCategory = 'ingredient' | 'supplies' | 'labor' | 'rent' | 'ut
 // 消費税率（%）。0=不課税・非課税（人件費など）、8=軽減税率（食材）、10=標準税率
 export type TaxRate = 0 | 8 | 10
 
+// 売上の既定税率。屋台＝持ち帰り中心のため軽減税率8%を既定にし、日ごとに変更できる
+export const DEFAULT_SALES_TAX_RATE: TaxRate = 8
+
 // カテゴリ別の既定税率（品目マスタに税率がない場合のフォールバック）
 export const DEFAULT_TAX_RATE: Record<ExpenseCategory, TaxRate> = {
   ingredient: 8,
@@ -112,9 +115,10 @@ export interface BucketDay {
 
 // 残高報告：現金バケット（屋台うなぎ現金、レジ金除く）
 export interface CashDay extends BucketDay {
-  sales: number      // 本日現金売上
+  sales: number            // 本日現金売上（税込＝実際に受け取った額。残高計算はこの値を使う）
   salesNote: string
-  toBank: number     // 銀行入金（現金→法人口座。法人残高へ自動反映）
+  salesTaxRate?: TaxRate   // 売上の消費税率。未設定はDEFAULT_SALES_TAX_RATE
+  toBank: number           // 銀行入金（現金→法人口座。法人残高へ自動反映）
 }
 
 // 残高報告：見込み項目（毎日前日から引き継ぎ・編集可）

@@ -126,7 +126,7 @@ export default function PL() {
 
   // 人件費はシフトから自動生成される明細で仕入れ先・品目の概念がないため、この集計からは外す。
   // 0円の行は入力途中の空枠なので同じく除外する
-  const purchases = useMemo(() => (pl?.ledger ?? []).filter(r => r.category !== 'labor' && r.amount !== 0), [pl])
+  const purchases = useMemo(() => (pl?.ledger ?? []).filter(r => r.category !== 'labor' && r.net !== 0), [pl])
 
   // 仕入れ先マスタ＋実際に使った仕入れ先名の一覧
   const knownVendors = useMemo(() => {
@@ -150,14 +150,15 @@ export default function PL() {
   if (!pl || !bg) return null
 
   const maxExpense = Math.max(1, ...pl.expenseByCategory.map(e => e.amount))
-  const profitable = pl.profit >= 0
+  const profitable = pl.profitNet >= 0
 
+  // 日報CSVは税抜ベース（画面と同じ）。実際に動いたお金が要るときのために税込の売上・支出計も末尾に付ける
   const exportDailyCsv = () => {
-    const header = ['日付', '売上', ...EXPENSE_CATEGORIES.map(c => EXPENSE_CATEGORY_LABEL[c]), '支出計', '利益']
+    const header = ['日付', '売上(税抜)', ...EXPENSE_CATEGORIES.map(c => `${EXPENSE_CATEGORY_LABEL[c]}(税抜)`), '支出計(税抜)', '利益(税抜)', '売上(税込)', '支出計(税込)']
     const rows = daily.map(row => [
-      row.date, row.revenue, ...EXPENSE_CATEGORIES.map(c => row.expenseByCategory[c]), row.expenseTotal, row.profit,
+      row.date, row.revenueNet, ...EXPENSE_CATEGORIES.map(c => row.expenseByCategory[c]), row.expenseNet, row.profitNet, row.revenue, row.expenseTotal,
     ])
-    const total = ['合計', pl.revenueTotal, ...EXPENSE_CATEGORIES.map(c => pl.expenseByCategory.find(e => e.category === c)?.amount ?? 0), pl.expenseTotal, pl.profit]
+    const total = ['合計', pl.revenueNet, ...EXPENSE_CATEGORIES.map(c => pl.expenseByCategory.find(e => e.category === c)?.amount ?? 0), pl.expenseNet, pl.profitNet, pl.revenueTotal, pl.expenseTotal]
     downloadCsv(`損益表_日報_${month}.csv`, [header, ...rows, total])
   }
 
@@ -172,8 +173,8 @@ export default function PL() {
   }
 
   const exportLedgerCsv = () => {
-    const header = ['日付', '口座', '分類', '仕入れ先', '内容', '金額']
-    const rows = pl.ledger.map(row => [row.date, PL_BUCKET_LABEL[row.bucket], pl.expenseByCategory.find(e => e.category === row.category)?.label ?? row.category, row.vendor, row.label, row.amount])
+    const header = ['日付', '口座', '分類', '仕入れ先', '内容', '税抜', '税込']
+    const rows = pl.ledger.map(row => [row.date, PL_BUCKET_LABEL[row.bucket], pl.expenseByCategory.find(e => e.category === row.category)?.label ?? row.category, row.vendor, row.label, row.net, row.amount])
     downloadCsv(`損益表_支出明細_${month}.csv`, [header, ...rows])
   }
 
@@ -197,15 +198,15 @@ export default function PL() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="card-header flex items-center gap-1">
-                  {profitable ? <TrendingUp size={12}/> : <TrendingDown size={12}/>} 当月損益
+                  {profitable ? <TrendingUp size={12}/> : <TrendingDown size={12}/>} 当月損益（税抜）
                 </div>
                 <div className={`text-3xl font-black ${profitable ? 'text-green-600' : 'text-red-600'}`}>
-                  {profitable ? '+' : ''}{fmt(pl.profit)}
+                  {profitable ? '+' : ''}{fmt(pl.profitNet)}
                 </div>
               </div>
               <div className="text-right text-xs text-gray-400">
-                <div>収入合計 {fmt(pl.revenueTotal)}</div>
-                <div>支出合計 {fmt(pl.expenseTotal)}</div>
+                <div>収入合計 {fmt(pl.revenueNet)}</div>
+                <div>支出合計 {fmt(pl.expenseNet)}</div>
                 <div className="mt-1">{pl.daysWithData}日分のデータ</div>
               </div>
             </div>
@@ -244,12 +245,15 @@ export default function PL() {
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {/* 売上高 */}
+            {/* 売上高（税込で受け取った額と、損益に使う税抜額を並べる） */}
             <div>
               <p className="section-header">売上高</p>
               <div className="card">
                 <table className="w-full text-sm">
                   <tbody>
+                    <tr className="text-[10px] text-gray-400">
+                      <td/><td className="text-right pb-1">税込</td>
+                    </tr>
                     <tr className="border-b border-gray-50">
                       <td className="py-2 text-gray-500">現金売上</td>
                       <td className="py-2 text-right font-bold text-blue-700">{fmt(pl.cashSales)}</td>
@@ -262,9 +266,17 @@ export default function PL() {
                       <td className="py-2 text-gray-500">個人入金</td>
                       <td className="py-2 text-right font-bold text-green-700">{fmt(pl.persDeposit)}</td>
                     </tr>
+                    <tr className="border-t border-gray-100">
+                      <td className="py-1.5 text-xs text-gray-400">収入合計（税込）</td>
+                      <td className="py-1.5 text-right text-xs text-gray-500">{fmt(pl.revenueTotal)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-1 text-xs text-gray-400">うち預かった消費税</td>
+                      <td className="py-1 text-right text-xs text-gray-400">-{fmt(pl.revenueTax)}</td>
+                    </tr>
                     <tr className="border-t-2 border-gray-200">
-                      <td className="py-2 font-bold">収入合計</td>
-                      <td className="py-2 text-right font-black">{fmt(pl.revenueTotal)}</td>
+                      <td className="py-2 font-bold">収入合計（税抜）</td>
+                      <td className="py-2 text-right font-black">{fmt(pl.revenueNet)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -273,7 +285,7 @@ export default function PL() {
 
             {/* 費用の部 */}
             <div>
-              <p className="section-header">費用の部（仕入・経費・人件費）</p>
+              <p className="section-header">費用の部（仕入・経費・人件費）／ 税抜</p>
               <div className="card">
                 <div className="space-y-2">
                   {bg.expenseLines.map(e => (
@@ -309,16 +321,16 @@ export default function PL() {
                   </div>
                 )}
                 <div className="flex justify-between mt-3 pt-3 border-t-2 border-gray-200">
-                  <span className="font-bold">費用合計（税込）</span>
-                  <span className="font-black">{fmt(pl.expenseTotal)}</span>
+                  <span className="font-bold">費用合計（税抜）</span>
+                  <span className="font-black">{fmt(pl.expenseNet)}</span>
                 </div>
                 <div className="flex justify-between mt-1 text-xs text-gray-400">
-                  <span>うち消費税（仕入税額）</span>
+                  <span>＋ 支払った消費税（仕入税額）</span>
                   <span>{fmt(pl.expenseTax)}</span>
                 </div>
                 <div className="flex justify-between mt-0.5 text-xs text-gray-500">
-                  <span>税抜の費用合計</span>
-                  <span className="font-bold">{fmt(pl.expenseTotal - pl.expenseTax)}</span>
+                  <span>実際に払った額（税込）</span>
+                  <span className="font-bold">{fmt(pl.expenseTotal)}</span>
                 </div>
               </div>
             </div>
@@ -328,7 +340,7 @@ export default function PL() {
           {purchases.length > 0 && (
             <>
               <div className="flex items-center justify-between mt-6">
-                <p className="section-header mb-0">仕入れ先別・品目別の集計</p>
+                <p className="section-header mb-0">仕入れ先別・品目別の集計 ／ 税抜</p>
                 <div className="flex items-center gap-2">
                   {focus && (
                     <button onClick={() => setFocus(null)}
@@ -360,7 +372,7 @@ export default function PL() {
 
           {/* 日報：日別の売上・利益 */}
           <div className="flex items-center justify-between mt-6">
-            <p className="section-header">日報（日別売上・利益）</p>
+            <p className="section-header">日報（日別売上・利益）／ 税抜</p>
             <button onClick={exportDailyCsv}
               className="flex items-center gap-1 text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">
               <Download size={12}/> CSVダウンロード
@@ -383,29 +395,29 @@ export default function PL() {
                 {[...daily].reverse().map(row => (
                   <tr key={row.date} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-1.5 pr-3 text-gray-500">{row.date.slice(5)}</td>
-                    <td className="text-right pr-3 text-blue-700 font-bold">{fmtShort(row.revenue)}</td>
+                    <td className="text-right pr-3 text-blue-700 font-bold">{fmtShort(row.revenueNet)}</td>
                     {EXPENSE_CATEGORIES.map(cat => (
                       <td key={cat} className="text-right pr-3 text-gray-600">
                         {row.expenseByCategory[cat] > 0 ? fmtShort(row.expenseByCategory[cat]) : '-'}
                       </td>
                     ))}
-                    <td className="text-right pr-3 text-red-600 font-bold">{fmtShort(row.expenseTotal)}</td>
-                    <td className={`text-right font-black ${row.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {row.profit >= 0 ? '+' : ''}{fmtShort(row.profit)}
+                    <td className="text-right pr-3 text-red-600 font-bold">{fmtShort(row.expenseNet)}</td>
+                    <td className={`text-right font-black ${row.profitNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {row.profitNet >= 0 ? '+' : ''}{fmtShort(row.profitNet)}
                     </td>
                   </tr>
                 ))}
                 <tr className="border-t-2 border-gray-200 font-bold">
                   <td className="py-2 pr-3">合計</td>
-                  <td className="text-right pr-3 text-blue-700">{fmtShort(pl.revenueTotal)}</td>
+                  <td className="text-right pr-3 text-blue-700">{fmtShort(pl.revenueNet)}</td>
                   {EXPENSE_CATEGORIES.map(cat => (
                     <td key={cat} className="text-right pr-3 text-gray-700">
                       {fmtShort(pl.expenseByCategory.find(e => e.category === cat)?.amount ?? 0)}
                     </td>
                   ))}
-                  <td className="text-right pr-3 text-red-600">{fmtShort(pl.expenseTotal)}</td>
-                  <td className={`text-right ${pl.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {pl.profit >= 0 ? '+' : ''}{fmtShort(pl.profit)}
+                  <td className="text-right pr-3 text-red-600">{fmtShort(pl.expenseNet)}</td>
+                  <td className={`text-right ${pl.profitNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {pl.profitNet >= 0 ? '+' : ''}{fmtShort(pl.profitNet)}
                   </td>
                 </tr>
               </tbody>
@@ -434,7 +446,8 @@ export default function PL() {
                     <th className="text-left pr-3">分類</th>
                     <th className="text-left pr-3">仕入れ先</th>
                     <th className="text-left pr-3">内容</th>
-                    <th className="text-right">金額</th>
+                    <th className="text-right pr-3">税抜</th>
+                    <th className="text-right">税込</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -449,7 +462,8 @@ export default function PL() {
                       </td>
                       <td className="pr-3 text-gray-400">{row.vendor || '-'}</td>
                       <td className="pr-3 text-gray-700">{row.label}</td>
-                      <td className="text-right font-bold text-gray-700">{fmtShort(row.amount)}</td>
+                      <td className="text-right pr-3 font-bold text-gray-700">{fmtShort(row.net)}</td>
+                      <td className="text-right text-gray-400">{fmtShort(row.amount)}</td>
                     </tr>
                   ))}
                 </tbody>

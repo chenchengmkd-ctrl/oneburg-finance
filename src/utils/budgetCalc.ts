@@ -8,8 +8,8 @@ const ALL_CATEGORIES = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
 export interface BudgetLine {
   category: ExpenseCategory
   label: string
-  actual: number      // 実績（税込）
-  budget: number      // 予算（税込）
+  actual: number      // 実績（税抜）
+  budget: number      // 予算（税抜）
   diff: number        // 予算 − 実績（プラスなら予算内、マイナスなら超過）
   rate: number | null // 消化率（実績/予算）。予算未設定ならnull
 }
@@ -96,7 +96,7 @@ export const hasAnyBudget = (b: MonthBudget) =>
 
 /**
  * 予実を計算する。実績は損益表（calcPL）と同じ集計を使うので、必ず損益表の数字と一致する。
- * 予算は税込（実績と同じ土俵）で持つ。
+ * 損益を税抜ベースにしたのに合わせ、実績・予算とも税抜で比べる（2026-08-09）。
  */
 export const calcBudget = (
   reports: Record<string, BalanceReport>,
@@ -140,19 +140,19 @@ export const calcBudget = (
     totalDays,
     paceRate,
 
-    revenueActual: pl.revenueTotal,
+    revenueActual: pl.revenueNet,
     revenueBudget,
-    revenueRate: rate(pl.revenueTotal, revenueBudget),
-    revenueDiff: pl.revenueTotal - revenueBudget,
+    revenueRate: rate(pl.revenueNet, revenueBudget),
+    revenueDiff: pl.revenueNet - revenueBudget,
 
     expenseLines,
-    expenseActual: pl.expenseTotal,
+    expenseActual: pl.expenseNet,
     expenseBudget,
-    expenseRate: rate(pl.expenseTotal, expenseBudget),
+    expenseRate: rate(pl.expenseNet, expenseBudget),
 
-    profitActual: pl.profit,
+    profitActual: pl.profitNet,
     profitBudget,
-    profitDiff: pl.profit - profitBudget,
+    profitDiff: pl.profitNet - profitBudget,
 
     dailyRevenueTarget: hasWeek(budget.weekdayRevenue)
       ? Math.round(revenueBudget / totalDays)

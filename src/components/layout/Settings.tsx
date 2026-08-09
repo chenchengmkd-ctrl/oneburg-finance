@@ -56,7 +56,7 @@ function VendorListEditor({ title, values, onChange }: {
   )
 }
 
-// 予算エディタ。金額はすべて税込（実績と同じ土俵で比べるため）
+// 予算エディタ。金額はすべて税抜（損益・実績と同じ土俵で比べるため）
 // 変更は「差分（patch）」で親に渡す。全体を組み立てて渡すと、連続更新のときに
 // 古いvalueを元にした保存が新しい値を上書きしてしまうため
 function BudgetEditor({ value, onPatch, onPatchExpense, onPatchWeek, month, isDefault }: {
@@ -311,7 +311,7 @@ export default function Settings() {
           </div>
         </div>
         <p className="text-xs text-gray-400 mb-4">
-          金額は税込で入れてください（実績と同じ土俵で比較します）。0のままの項目は予実に表示されません
+          金額は<strong className="text-gray-500">税抜</strong>で入れてください（損益・実績と同じ土俵で比較します）。0のままの項目は予実に表示されません
         </p>
         <BudgetEditor value={editingBudget} onPatch={onPatchBudget} onPatchExpense={onPatchBudgetExpense}
           onPatchWeek={onPatchBudgetWeek} month={targetMonth} isDefault={budgetScope === 'default'}/>

@@ -1,6 +1,18 @@
-import type { BalanceReport, ExpenseCategory } from '../types'
+import type { BalanceReport, CashDay, LineItem, ExpenseCategory } from '../types'
 import { EXPENSE_CATEGORY_LABEL } from '../types'
-import { itemTax } from './storage'
+import { itemTax, toNet, salesTaxRateOf } from './storage'
+
+// 収入側の消費税。売上は日ごとの売上税率、入金明細は明細に税率があればそれ、無ければ売上と同じ税率で見る
+// （入金は基本的に売上の入金なので、費用側の既定10%を当てると実態とズレる）
+const revenueTaxOf = (cash: CashDay, deposits: LineItem[]): number => {
+  const rate = salesTaxRateOf(cash)
+  let tax = cash.sales - toNet(cash.sales, rate)
+  for (const d of deposits) {
+    const r = d.taxRate ?? rate
+    tax += d.amount - toNet(d.amount, r)
+  }
+  return tax
+}
 
 export interface PLExpenseLine {
   category: ExpenseCategory
@@ -13,7 +25,8 @@ export interface PLLedgerRow {
   bucket: 'corp' | 'pers' | 'cash'
   label: string
   vendor: string
-  amount: number
+  amount: number    // 税込＝実際に払った額
+  net: number       // 税抜。仕入れ先別・品目別の集計はこちらを使い、損益表の他の数字と揃える
   category: ExpenseCategory
 }
 
@@ -34,11 +47,15 @@ export interface PLResult {
   cashSales: number       // 現金売上
   corpDeposit: number     // 法人入金（現金からの銀行入金は除く。純粋な外部入金のみ）
   persDeposit: number     // 個人入金
-  revenueTotal: number    // 収入合計
-  expenseByCategory: PLExpenseLine[]  // カテゴリ別支出（食品仕入・備品仕入・人件費・家賃・水道光熱費・その他）
+  revenueTotal: number    // 収入合計（税込）
+  revenueTax: number      // 収入に含まれる消費税（預かった税）
+  revenueNet: number      // 収入合計（税抜）
+  expenseByCategory: PLExpenseLine[]  // カテゴリ別支出（税抜）。損益・予実はこの税抜ベースで比較する
   expenseTotal: number    // 支出合計（税込）
   expenseTax: number      // 支出に含まれる消費税（仕入税額）
-  profit: number          // 損益 = 収入合計 − 支出合計
+  expenseNet: number      // 支出合計（税抜）
+  profit: number          // 損益（税込ベース）= 収入合計 − 支出合計
+  profitNet: number       // 損益（税抜ベース）= 税抜収入 − 税抜費用。損益表の主表示はこちら
   ledger: PLLedgerRow[]   // 全引出明細（日付順）
   daysWithData: number
 }
@@ -48,10 +65,13 @@ export { BUCKET_LABEL as PL_BUCKET_LABEL }
 
 export interface DailyPLRow {
   date: string
-  revenue: number
-  expenseByCategory: Record<ExpenseCategory, number>
-  expenseTotal: number
-  profit: number
+  revenue: number         // 税込
+  revenueNet: number      // 税抜
+  expenseByCategory: Record<ExpenseCategory, number>  // 税抜
+  expenseTotal: number    // 税込
+  expenseNet: number      // 税抜
+  profit: number          // 税込ベース
+  profitNet: number       // 税抜ベース（日報の主表示）
 }
 
 // 日報：日別の売上・カテゴリ別費用・利益（残高報告の入金・引出明細から自動集計。連動のため入力不要）
@@ -64,17 +84,26 @@ export const calcDailyPL = (reports: Record<string, BalanceReport>, month: strin
       + r.corp.deposits.reduce((s, i) => s + i.amount, 0)
       + r.pers.deposits.reduce((s, i) => s + i.amount, 0)
 
+    // カテゴリ別は税抜で持つ（損益を税抜ベースで見るため）。合計は税込・税抜の両方を出す
     const expenseByCategory: Record<ExpenseCategory, number> = {
       ingredient: 0, supplies: 0, labor: 0, rent: 0, utility: 0, other: 0,
     }
+    let expenseTotal = 0
+    let expenseNet = 0
     for (const day of [r.corp, r.pers, r.cash]) {
       for (const item of day.withdraws) {
-        expenseByCategory[item.category ?? 'other'] += item.amount
+        const net = item.amount - itemTax(item)
+        expenseByCategory[item.category ?? 'other'] += net
+        expenseTotal += item.amount
+        expenseNet += net
       }
     }
-    const expenseTotal = Object.values(expenseByCategory).reduce((s, v) => s + v, 0)
+    const revenueNet = revenue - revenueTaxOf(r.cash, [...r.corp.deposits, ...r.pers.deposits])
 
-    return { date, revenue, expenseByCategory, expenseTotal, profit: revenue - expenseTotal }
+    return {
+      date, revenue, revenueNet, expenseByCategory, expenseTotal, expenseNet,
+      profit: revenue - expenseTotal, profitNet: revenueNet - expenseNet,
+    }
   })
 }
 
@@ -90,19 +119,22 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
   }
   const ledger: PLLedgerRow[] = []
   let expenseTax = 0
+  let revenueTax = 0
 
   for (const date of dates) {
     const r = reports[date]
     cashSales += r.cash.sales
     corpDeposit += r.corp.deposits.reduce((s, i) => s + i.amount, 0)
     persDeposit += r.pers.deposits.reduce((s, i) => s + i.amount, 0)
+    revenueTax += revenueTaxOf(r.cash, [...r.corp.deposits, ...r.pers.deposits])
 
     for (const [bucket, day] of [['corp', r.corp], ['pers', r.pers], ['cash', r.cash]] as const) {
       for (const item of day.withdraws) {
         const cat = item.category ?? 'other'
-        expenseMap[cat] += item.amount
-        expenseTax += itemTax(item)
-        ledger.push({ date, bucket, label: item.label || NO_LABEL_KEY, vendor: item.vendor ?? '', amount: item.amount, category: cat })
+        const tax = itemTax(item)
+        expenseMap[cat] += item.amount - tax   // カテゴリ別は税抜で積む
+        expenseTax += tax
+        ledger.push({ date, bucket, label: item.label || NO_LABEL_KEY, vendor: item.vendor ?? '', amount: item.amount, net: item.amount - tax, category: cat })
       }
     }
   }
@@ -111,11 +143,16 @@ export const calcPL = (reports: Record<string, BalanceReport>, month: string): P
     .map(cat => ({ category: cat, label: EXPENSE_CATEGORY_LABEL[cat], amount: expenseMap[cat] }))
 
   const revenueTotal = cashSales + corpDeposit + persDeposit
-  const expenseTotal = Object.values(expenseMap).reduce((s, v) => s + v, 0)
+  const revenueNet = revenueTotal - revenueTax
+  const expenseNet = Object.values(expenseMap).reduce((s, v) => s + v, 0)  // expenseMapは税抜
+  const expenseTotal = expenseNet + expenseTax
 
   return {
-    month, cashSales, corpDeposit, persDeposit, revenueTotal,
-    expenseByCategory, expenseTotal, expenseTax, profit: revenueTotal - expenseTotal,
+    month, cashSales, corpDeposit, persDeposit,
+    revenueTotal, revenueTax, revenueNet,
+    expenseByCategory, expenseTotal, expenseTax, expenseNet,
+    profit: revenueTotal - expenseTotal,
+    profitNet: revenueNet - expenseNet,
     ledger: ledger.sort((a, b) => a.date.localeCompare(b.date)),
     daysWithData: dates.length,
   }
@@ -130,9 +167,9 @@ export const groupLedger = (ledger: PLLedgerRow[], pick: (row: PLLedgerRow) => s
   for (const row of ledger) {
     const key = pick(row).trim() || UNSET_KEY
     const cur = map.get(key) ?? { amount: 0, count: 0, byCat: {} }
-    cur.amount += row.amount
+    cur.amount += row.net          // 損益表の他の数字と揃えるため税抜で積む
     cur.count += 1
-    cur.byCat[row.category] = (cur.byCat[row.category] ?? 0) + row.amount
+    cur.byCat[row.category] = (cur.byCat[row.category] ?? 0) + row.net
     map.set(key, cur)
   }
   return [...map.entries()]
