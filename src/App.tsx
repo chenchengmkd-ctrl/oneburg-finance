@@ -4,10 +4,11 @@ import Dashboard from './components/dashboard/Dashboard'
 import DailyEntry from './components/daily/DailyEntry'
 import Payments from './components/payments/Payments'
 import PL from './components/pl/PL'
+import Analytics from './components/analytics/Analytics'
 import SettingsPage from './components/layout/Settings'
 import { useAppStore } from './stores/appStore'
 
-const VALID_PAGES = ['dashboard', 'daily', 'payments', 'pl', 'settings']
+const VALID_PAGES = ['dashboard', 'daily', 'payments', 'pl', 'analytics', 'settings']
 
 export default function App() {
   const { currentPage, setPage, setSelectedDate } = useAppStore()
@@ -30,6 +31,7 @@ export default function App() {
     daily:     <DailyEntry />,
     payments:  <Payments />,
     pl:        <PL />,
+    analytics: <Analytics />,
     settings:  <SettingsPage />,
   }
 
