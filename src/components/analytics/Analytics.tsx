@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores/appStore'
 import { fmt, fmtShort } from '../../utils/calculations'
 import {
   monthsOf, calcMonthStats, calcWeekdayStats, calcDailySeries, compareGroups, flVerdict,
+  rankItems, calcCustomerWeekday, calcHourly, summarizeCustomers,
 } from '../../utils/analyticsCalc'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, BarChart,
@@ -42,10 +43,10 @@ function DiffBadge({ diff }: { diff: number }) {
 }
 
 export default function Analytics() {
-  const { reports, loadReports } = useAppStore()
+  const { reports, loadReports, salesDetails, loadSalesDetails } = useAppStore()
   const [compareBy, setCompareBy] = useState<'label' | 'vendor'>('label')
 
-  useEffect(() => { loadReports() }, [])
+  useEffect(() => { loadReports(); loadSalesDetails() }, [])
 
   const months = useMemo(() => monthsOf(reports), [reports])
   const monthStats = useMemo(() => calcMonthStats(reports, months), [reports, months])
@@ -61,6 +62,16 @@ export default function Analytics() {
       .filter(r => r.diff !== 0)
   }, [reports, months, compareBy])
 
+  // Squareのレジ明細。取り込み済みの日だけが入る
+  const details = useMemo(
+    () => Object.values(salesDetails).sort((a, b) => a.date.localeCompare(b.date)),
+    [salesDetails],
+  )
+  const itemRanks = useMemo(() => rankItems(details), [details])
+  const custWeekday = useMemo(() => calcCustomerWeekday(details), [details])
+  const hourly = useMemo(() => calcHourly(details), [details])
+  const custSummary = useMemo(() => summarizeCustomers(details), [details])
+
   if (!latest) {
     return (
       <div className="p-4 sm:p-6 max-w-6xl">
@@ -75,6 +86,10 @@ export default function Analytics() {
   const bestDay = [...weekday].filter(w => w.openDays > 0).sort((a, b) => b.avgAfterLabor - a.avgAfterLabor)[0]
   const worstDay = [...weekday].filter(w => w.openDays > 0).sort((a, b) => a.avgAfterLabor - b.avgAfterLabor)[0]
   const maxAvgRevenue = Math.max(1, ...weekday.map(w => w.avgRevenue))
+
+  const topItem = itemRanks[0]
+  const maxItemAmount = Math.max(1, ...itemRanks.map(r => r.amount))
+  const maxAvgCustomers = Math.max(1, ...custWeekday.map(w => w.avgCustomers))
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl">
@@ -227,6 +242,103 @@ export default function Analytics() {
           </table>
         </div>
       </div>
+
+      {/* Squareのレジ明細（出数・客数）。取り込みがある月だけ出す */}
+      {details.length > 0 ? (
+        <>
+          <p className="section-header">
+            レジの明細（Square）／ {custSummary.days}日分・税込
+          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <StatCard label="客数（のべ）" value={`${custSummary.customers.toLocaleString()}組`}
+              sub={`1日あたり ${custSummary.avgCustomers}組`}/>
+            <StatCard label="客単価" value={fmt(custSummary.perCustomer)}
+              sub="レジ売上 ÷ 会計数"/>
+            <StatCard label="出数1位" value={topItem ? `${topItem.qty}個` : '-'}
+              sub={topItem ? `${topItem.name}（売上の${Math.round(topItem.share * 100)}%）` : 'データなし'}/>
+            <StatCard label="商品数" value={`${itemRanks.length}品`}
+              sub="この期間に1つ以上売れたもの"/>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            {/* 出数ランキング */}
+            <div className="card">
+              <div className="card-header mb-2">出数ランキング</div>
+              <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+                {itemRanks.map(r => (
+                  <div key={r.name}>
+                    <div className="flex items-baseline gap-2 text-xs mb-0.5">
+                      <span className="flex-1 truncate text-gray-700">{r.name}</span>
+                      <span className="text-[10px] text-gray-400 shrink-0">{r.qty}個</span>
+                      <span className="font-bold text-gray-700 shrink-0 w-16 text-right">{fmtShort(r.amount)}</span>
+                    </div>
+                    <div className="h-1 bg-gray-100 rounded overflow-hidden">
+                      <div className="h-full bg-blue-600 rounded" style={{ width: `${(r.amount / maxItemAmount) * 100}%` }}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 時間帯 */}
+            <div className="card">
+              <div className="card-header mb-2">時間帯ごとの会計数</div>
+              {hourly.length === 0 ? (
+                <div className="text-xs text-gray-400 py-8 text-center">データがありません</div>
+              ) : (
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={hourly}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }}/>
+                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false}/>
+                      <Tooltip formatter={(v) => `${Number(v)}組`}/>
+                      <Bar dataKey="customers" name="会計数" fill="#0d9488" radius={[3, 3, 0, 0]}/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 曜日ごとの客数・客単価 */}
+          <div className="card mb-6 overflow-x-auto">
+            <div className="card-header mb-2">曜日ごとの客数と客単価</div>
+            <table className="w-full text-sm min-w-[420px]">
+              <thead>
+                <tr className="border-b border-gray-100 text-gray-400 text-xs">
+                  <th className="text-left py-2 pr-3">曜日</th>
+                  <th className="text-right pr-3">日数</th>
+                  <th className="text-right pr-3">平均客数</th>
+                  <th className="text-right pr-3">客単価</th>
+                  <th className="text-left pl-3 w-1/3">客数の多さ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {custWeekday.map(w => (
+                  <tr key={w.dow} className={`border-b border-gray-50 ${w.days === 0 ? 'opacity-40' : ''}`}>
+                    <td className={`py-1.5 pr-3 font-bold ${w.dow === 0 || w.dow === 6 ? 'text-red-500' : 'text-gray-700'}`}>{w.label}</td>
+                    <td className="text-right pr-3 text-gray-500">{w.days > 0 ? `${w.days}日` : '-'}</td>
+                    <td className="text-right pr-3 text-teal-700 font-bold">{w.days > 0 ? `${w.avgCustomers}組` : '-'}</td>
+                    <td className="text-right pr-3 text-gray-600">{w.days > 0 ? fmtShort(w.avgPerCustomer) : '-'}</td>
+                    <td className="pl-3">
+                      <div className="h-2 bg-gray-100 rounded overflow-hidden">
+                        <div className="h-full bg-teal-600 rounded" style={{ width: `${(w.avgCustomers / maxAvgCustomers) * 100}%` }}/>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <div className="card mb-6 text-sm text-gray-500">
+          <div className="font-bold text-gray-700 mb-1">出数・客数はまだ取り込まれていません</div>
+          LINEで「<span className="font-mono">出数取込 2026-07</span>」のように送ると、その月のレジ明細を取り込みます。
+          取り込むと、商品ごとの売れた個数・客数・客単価・時間帯の混み具合がここに出ます。
+        </div>
+      )}
 
       {/* 日別の推移 */}
       <p className="section-header">日ごとの売上と損益</p>

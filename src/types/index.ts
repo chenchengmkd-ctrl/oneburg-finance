@@ -1,3 +1,21 @@
+// Squareのレジ明細（LINEボット側が birdmen:sales:YYYY-MM-DD に書き込む）。
+// アプリからは読むだけ。売上金額そのものは日次データ側が正で、こちらは
+// 「何が何個売れたか」「何組来たか」というSquareにしか無い情報を持つ
+export interface SalesItem {
+  name: string
+  qty: number
+  amount: number   // 税込
+}
+
+export interface SalesDetail {
+  date: string
+  customers: number       // 会計数（＝組数）
+  total: number           // 税込
+  perCustomer: number     // 客単価
+  items: SalesItem[]      // 金額の大きい順
+  byHour: Record<string, number>  // 時間帯（JST）ごとの会計数
+}
+
 // 初期設定
 export interface Settings {
   targetMonth: string          // 管理対象月 YYYY-MM

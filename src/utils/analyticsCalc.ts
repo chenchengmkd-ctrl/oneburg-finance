@@ -1,4 +1,4 @@
-import type { BalanceReport, ExpenseCategory } from '../types'
+import type { BalanceReport, ExpenseCategory, SalesDetail } from '../types'
 import { calcPL, calcDailyPL, groupLedger } from './plCalc'
 import type { PLGroupRow } from './plCalc'
 import { WD_JP } from './calculations'
@@ -158,6 +158,98 @@ export const compareGroups = (
       return { key, current, previous, diff: current - previous }
     })
     .sort((a, b) => b.diff - a.diff)
+}
+
+// ===== ここからSquareのレジ明細（出数・客数）の集計 =====
+// 売上金額は日次データ（report:）が正。こちらは「何が何個売れたか」「何組来たか」という
+// レジにしか無い情報を扱う。取り込まれていない日は単に集計から抜けるだけで、他の分析には影響しない。
+
+export interface ItemRank {
+  name: string
+  qty: number
+  amount: number
+  share: number     // 売上構成比
+}
+
+/** 期間内の出数ランキング（同じ商品名は合算。売上の大きい順） */
+export const rankItems = (details: SalesDetail[]): ItemRank[] => {
+  const map = new Map<string, { name: string; qty: number; amount: number }>()
+  for (const d of details) {
+    for (const i of d.items ?? []) {
+      const cur = map.get(i.name) ?? { name: i.name, qty: 0, amount: 0 }
+      cur.qty += i.qty
+      cur.amount += i.amount
+      map.set(i.name, cur)
+    }
+  }
+  const rows = [...map.values()].sort((a, b) => b.amount - a.amount)
+  const total = rows.reduce((s, r) => s + r.amount, 0)
+  return rows.map(r => ({ ...r, share: total > 0 ? r.amount / total : 0 }))
+}
+
+export interface CustomerWeekday {
+  dow: number
+  label: string
+  days: number
+  customers: number
+  avgCustomers: number
+  avgPerCustomer: number   // 客単価
+}
+
+/** 曜日ごとの客数・客単価 */
+export const calcCustomerWeekday = (details: SalesDetail[]): CustomerWeekday[] => {
+  const acc = WD_JP.map((label, dow) => ({ dow, label, days: 0, customers: 0, total: 0 }))
+  for (const d of details) {
+    if (!d.customers) continue
+    const a = acc[new Date(d.date).getDay()]
+    a.days += 1
+    a.customers += d.customers
+    a.total += d.total
+  }
+  return acc.map(a => ({
+    dow: a.dow,
+    label: a.label,
+    days: a.days,
+    customers: a.customers,
+    avgCustomers: a.days > 0 ? Math.round(a.customers / a.days) : 0,
+    avgPerCustomer: a.customers > 0 ? Math.round(a.total / a.customers) : 0,
+  }))
+}
+
+/** 時間帯ごとの会計数（何時に混むか）。営業していない時間帯は前後を切り落とす */
+export const calcHourly = (details: SalesDetail[]): { hour: number; label: string; customers: number }[] => {
+  const hours: number[] = new Array(24).fill(0)
+  for (const d of details) {
+    for (const [h, n] of Object.entries(d.byHour ?? {})) {
+      const hour = Number(h)
+      if (Number.isInteger(hour) && hour >= 0 && hour < 24) hours[hour] += n
+    }
+  }
+  const first = hours.findIndex(n => n > 0)
+  if (first < 0) return []
+  let last = 23
+  while (last > first && hours[last] === 0) last--
+  return hours.slice(first, last + 1)
+    .map((customers, i) => ({ hour: first + i, label: `${first + i}時`, customers }))
+}
+
+export interface CustomerSummary {
+  days: number
+  customers: number
+  total: number
+  avgCustomers: number
+  perCustomer: number
+}
+
+export const summarizeCustomers = (details: SalesDetail[]): CustomerSummary => {
+  const days = details.filter(d => d.customers > 0).length
+  const customers = details.reduce((s, d) => s + (d.customers || 0), 0)
+  const total = details.reduce((s, d) => s + (d.total || 0), 0)
+  return {
+    days, customers, total,
+    avgCustomers: days > 0 ? Math.round(customers / days) : 0,
+    perCustomer: customers > 0 ? Math.round(total / customers) : 0,
+  }
 }
 
 /** FL比率の評価。飲食店の一般的な目安に照らして色分けするために使う */

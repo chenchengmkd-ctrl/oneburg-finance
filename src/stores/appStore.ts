@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern } from '../types'
+import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern, SalesDetail } from '../types'
 import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, defaultShiftPattern, migrateShiftPattern, migrateReport } from '../utils/storage'
 
 interface AppState {
@@ -48,6 +48,10 @@ interface AppState {
   shiftPattern: ShiftPattern
   loadShiftPattern: () => Promise<void>
   saveShiftPattern: (data: ShiftPattern) => Promise<void>
+
+  // Squareのレジ明細（出数・客数）。ボットが書き込み、アプリは読むだけ
+  salesDetails: Record<string, SalesDetail>
+  loadSalesDetails: () => Promise<void>
 
   // 選択中の日付
   selectedDate: string
@@ -169,5 +173,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveShiftPattern: async (data) => {
     set({ shiftPattern: data })
     await storage.set('shift-pattern', data)
+  },
+
+  salesDetails: {},
+  loadSalesDetails: async () => {
+    const keys = await storage.keys('sales:')
+    const fetched = await Promise.all(keys.map(key => storage.get<SalesDetail>(key)))
+    const salesDetails: Record<string, SalesDetail> = {}
+    for (const d of fetched) {
+      if (d?.date) salesDetails[d.date] = d
+    }
+    set({ salesDetails })
   },
 }))
