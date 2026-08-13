@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { fmt, fmtShort } from '../../utils/calculations'
+import { fmt, fmtShort, todayStr } from '../../utils/calculations'
 import {
   monthsOf, calcMonthStats, calcWeekdayStats, calcDailySeries, compareGroups, flVerdict,
-  rankItems, calcCustomerWeekday, calcHourly, summarizeCustomers,
+  rankItems, calcCustomerWeekday, calcHourly, summarizeCustomers, calcWeeklyStats, calcMonthForecast,
 } from '../../utils/analyticsCalc'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, BarChart,
@@ -43,8 +43,9 @@ function DiffBadge({ diff }: { diff: number }) {
 }
 
 export default function Analytics() {
-  const { reports, loadReports, salesDetails, loadSalesDetails } = useAppStore()
+  const { reports, loadReports, salesDetails, loadSalesDetails, setPage } = useAppStore()
   const [compareBy, setCompareBy] = useState<'label' | 'vendor'>('label')
+  const todayIso = todayStr()
 
   useEffect(() => { loadReports(); loadSalesDetails() }, [])
 
@@ -52,6 +53,8 @@ export default function Analytics() {
   const monthStats = useMemo(() => calcMonthStats(reports, months), [reports, months])
   const weekday = useMemo(() => calcWeekdayStats(reports, months), [reports, months])
   const daily = useMemo(() => calcDailySeries(reports, months), [reports, months])
+  const weekly = useMemo(() => calcWeeklyStats(reports, months, salesDetails), [reports, months, salesDetails])
+  const forecast = useMemo(() => calcMonthForecast(reports, salesDetails, todayIso), [reports, salesDetails, todayIso])
 
   const latest = monthStats[monthStats.length - 1]
   const prev = monthStats[monthStats.length - 2]
@@ -100,6 +103,32 @@ export default function Analytics() {
         </p>
       </div>
 
+      {/* 今月の着地予想 */}
+      {forecast && (
+        <div className="card border-l-4 border-blue-500 mb-6">
+          <div className="card-header mb-2">{forecast.month.replace('-', '年')}月の着地予想</div>
+          <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
+            <div>
+              <div className="text-3xl font-black text-blue-700">{fmt(forecast.projectedRevenue)}</div>
+              <div className="text-[11px] text-gray-400 mt-0.5">売上の見込み（税抜）</div>
+            </div>
+            {forecast.projectedCustomers !== null && (
+              <div>
+                <div className="text-2xl font-black text-teal-700">{forecast.projectedCustomers.toLocaleString()}組</div>
+                <div className="text-[11px] text-gray-400 mt-0.5">客数の見込み</div>
+              </div>
+            )}
+            <div className="text-xs text-gray-400 ml-auto">
+              {forecast.daysElapsed}/{forecast.totalDays}日経過・営業{forecast.openDaysSoFar}日
+              <br/>ここまでの実績 {fmtShort(forecast.actualRevenue)}
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-3 pt-2 border-t border-gray-100">
+            ここまでの営業ペースと1日あたり平均をもとに、このまま続いた場合の見込みを機械的に計算したものです
+          </p>
+        </div>
+      )}
+
       {/* 最新月の主要指標 */}
       <p className="section-header">{latest.month.replace('-', '年')}月の指標（営業{latest.openDays}日）</p>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -116,14 +145,59 @@ export default function Analytics() {
           tone={flVerdict(latest.flRate)}/>
       </div>
 
-      {/* 月次の推移 */}
-      <p className="section-header">月ごとの推移</p>
+      {/* 週次まとめ（月次より短いスパンで直近の勢いを見る） */}
+      <p className="section-header">週次まとめ</p>
+      <div className="card mb-6">
+        <div className="h-56 -ml-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={weekly.map(w => ({ 週: w.label, 売上: w.revenue }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+              <XAxis dataKey="週" tick={{ fontSize: 11 }}/>
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${Math.round(v / 1000)}千`}/>
+              <Tooltip formatter={(v) => fmt(Number(v))}/>
+              <Bar dataKey="売上" fill="#1565C0" radius={[3, 3, 0, 0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="overflow-x-auto mt-3">
+          <table className="w-full text-sm min-w-[520px]">
+            <thead>
+              <tr className="border-b border-gray-100 text-gray-400 text-xs">
+                <th className="text-left py-2 pr-3">週（月〜日）</th>
+                <th className="text-right pr-3">営業日</th>
+                <th className="text-right pr-3">売上</th>
+                <th className="text-right pr-3">1日平均</th>
+                <th className="text-right pr-3">客数</th>
+                <th className="text-right">客単価</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...weekly].reverse().map(w => (
+                <tr key={w.weekStart} className="border-b border-gray-50">
+                  <td className="py-1.5 pr-3 font-bold text-gray-700">{w.label}</td>
+                  <td className="text-right pr-3 text-gray-500">{w.openDays}日</td>
+                  <td className="text-right pr-3 text-blue-700 font-bold">{fmtShort(w.revenue)}</td>
+                  <td className="text-right pr-3 text-gray-600">{fmtShort(w.avgRevenue)}</td>
+                  <td className="text-right pr-3 text-teal-700">{w.customers !== null ? `${w.customers}組` : '-'}</td>
+                  <td className="text-right text-gray-600">{w.perCustomer !== null ? fmtShort(w.perCustomer) : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 月次の推移。損益そのものは損益表に任せ、ここではコスト構造だけを見る */}
+      <div className="flex items-center justify-between">
+        <p className="section-header mb-0">月ごとの推移</p>
+        <button onClick={() => setPage('pl')} className="text-xs text-blue-600 hover:underline">損益表で詳しく見る →</button>
+      </div>
       <div className="card mb-6">
         <div className="h-64 -ml-2">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={monthStats.map(m => ({
               month: `${Number(m.month.slice(5))}月`,
-              売上: m.revenue, 食材: m.food, 人件費: m.labor, その他: m.supplies + m.other, 損益: m.profit,
+              売上: m.revenue, 食材: m.food, 人件費: m.labor, その他: m.supplies + m.other,
             }))}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
               <XAxis dataKey="month" tick={{ fontSize: 12 }}/>
@@ -134,12 +208,11 @@ export default function Analytics() {
               <Bar dataKey="人件費" stackId="c" fill="#a855f7"/>
               <Bar dataKey="その他" stackId="c" fill="#f59e0b"/>
               <Line type="monotone" dataKey="売上" stroke="#1565C0" strokeWidth={2} dot={{ r: 3 }}/>
-              <Line type="monotone" dataKey="損益" stroke="#16a34a" strokeWidth={2} dot={{ r: 3 }}/>
             </ComposedChart>
           </ResponsiveContainer>
         </div>
         <div className="overflow-x-auto mt-4">
-          <table className="w-full text-sm min-w-[640px]">
+          <table className="w-full text-sm min-w-[560px]">
             <thead>
               <tr className="border-b border-gray-100 text-gray-400 text-xs">
                 <th className="text-left py-2 pr-3">月</th>
@@ -148,8 +221,7 @@ export default function Analytics() {
                 <th className="text-right pr-3">1日平均</th>
                 <th className="text-right pr-3">原価率</th>
                 <th className="text-right pr-3">人件費率</th>
-                <th className="text-right pr-3">FL比率</th>
-                <th className="text-right">損益</th>
+                <th className="text-right">FL比率</th>
               </tr>
             </thead>
             <tbody>
@@ -163,10 +235,7 @@ export default function Analytics() {
                     <td className="text-right pr-3 text-gray-600">{fmtShort(m.avgRevenue)}</td>
                     <td className="text-right pr-3 text-gray-600">{pctText(m.foodRate)}</td>
                     <td className="text-right pr-3 text-gray-600">{pctText(m.laborRate)}</td>
-                    <td className={`text-right pr-3 font-bold ${tone ? VERDICT_STYLE[tone] : 'text-gray-400'}`}>{pctText(m.flRate)}</td>
-                    <td className={`text-right font-black ${m.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {m.profit >= 0 ? '+' : ''}{fmtShort(m.profit)}
-                    </td>
+                    <td className={`text-right font-bold ${tone ? VERDICT_STYLE[tone] : 'text-gray-400'}`}>{pctText(m.flRate)}</td>
                   </tr>
                 )
               })}
@@ -341,7 +410,7 @@ export default function Analytics() {
       )}
 
       {/* 日別の推移 */}
-      <p className="section-header">日ごとの売上と損益</p>
+      <p className="section-header">日ごとの売上</p>
       <div className="card mb-6">
         <div className="h-56 -ml-2">
           <ResponsiveContainer width="100%" height="100%">
@@ -350,9 +419,7 @@ export default function Analytics() {
               <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={20}/>
               <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${Math.round(v / 1000)}千`}/>
               <Tooltip formatter={(v) => fmt(Number(v))} labelFormatter={l => `${l}`}/>
-              <Legend wrapperStyle={{ fontSize: 12 }}/>
               <Bar dataKey="revenue" name="売上" fill="#93c5fd" radius={[2, 2, 0, 0]}/>
-              <Line type="monotone" dataKey="profit" name="損益" stroke="#16a34a" strokeWidth={2} dot={false}/>
             </ComposedChart>
           </ResponsiveContainer>
         </div>

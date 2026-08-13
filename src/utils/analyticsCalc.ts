@@ -60,6 +60,129 @@ export const calcMonthStats = (reports: Record<string, BalanceReport>, months: s
     }
   })
 
+const daysInMonth = (month: string) => {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(y, m, 0).getDate()
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** その日を含む週の月曜日（YYYY-MM-DD）。月をまたぐ週もそのまま扱う */
+const mondayOf = (dateIso: string): string => {
+  const d = new Date(dateIso)
+  const diff = d.getDay() === 0 ? -6 : 1 - d.getDay()
+  d.setDate(d.getDate() + diff)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+const shortDate = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`
+
+export interface WeekStat {
+  weekStart: string
+  label: string           // 「8/4〜8/10」
+  openDays: number
+  revenue: number
+  avgRevenue: number
+  customers: number | null      // Squareの明細が無い週はnull（列自体を薄く出す）
+  avgCustomers: number | null
+  perCustomer: number | null
+}
+
+/**
+ * 週次まとめ（月曜始まり）。月ごとの推移より短いスパンで直近の勢いを見るためのもの。
+ * Squareの出数データは未取込の週もあるため、客数系はnullable＝取れているところだけ表示する。
+ */
+export const calcWeeklyStats = (
+  reports: Record<string, BalanceReport>,
+  months: string[],
+  salesDetails: Record<string, SalesDetail>,
+): WeekStat[] => {
+  const acc = new Map<string, { openDays: number; revenue: number; customers: number; custDays: number; custTotal: number }>()
+
+  for (const month of months) {
+    for (const row of calcDailyPL(reports, month)) {
+      if (row.revenueNet <= 0) continue
+      const wk = mondayOf(row.date)
+      const a = acc.get(wk) ?? { openDays: 0, revenue: 0, customers: 0, custDays: 0, custTotal: 0 }
+      a.openDays += 1
+      a.revenue += row.revenueNet
+      const sd = salesDetails[row.date]
+      if (sd?.customers) {
+        a.customers += sd.customers
+        a.custDays += 1
+        a.custTotal += sd.total
+      }
+      acc.set(wk, a)
+    }
+  }
+
+  return [...acc.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([weekStart, a]) => {
+      const end = new Date(weekStart)
+      end.setDate(end.getDate() + 6)
+      const endIso = `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`
+      return {
+        weekStart,
+        label: `${shortDate(weekStart)}〜${shortDate(endIso)}`,
+        openDays: a.openDays,
+        revenue: a.revenue,
+        avgRevenue: a.openDays > 0 ? Math.round(a.revenue / a.openDays) : 0,
+        customers: a.custDays > 0 ? a.customers : null,
+        avgCustomers: a.custDays > 0 ? Math.round(a.customers / a.custDays) : null,
+        perCustomer: a.customers > 0 ? Math.round(a.custTotal / a.customers) : null,
+      }
+    })
+}
+
+export interface MonthForecast {
+  month: string
+  daysElapsed: number
+  totalDays: number
+  openDaysSoFar: number
+  projectedOpenDays: number
+  actualRevenue: number
+  projectedRevenue: number
+  actualCustomers: number | null
+  projectedCustomers: number | null
+}
+
+/**
+ * 今月の着地予想。「ここまでの営業日ペース × 1日あたり平均」を残り日数分だけ延ばして見積もる。
+ * 進行中の月（今日を含む月）以外はnullを返す（終わった月に着地予想は不要なため）。
+ */
+export const calcMonthForecast = (
+  reports: Record<string, BalanceReport>,
+  salesDetails: Record<string, SalesDetail>,
+  todayIso: string,
+): MonthForecast | null => {
+  const month = todayIso.slice(0, 7)
+  const totalDays = daysInMonth(month)
+  const daysElapsed = Number(todayIso.slice(8, 10))
+  const daily = calcDailyPL(reports, month).filter(d => d.revenueNet > 0)
+  const openDaysSoFar = daily.length
+  if (openDaysSoFar === 0) return null
+
+  const actualRevenue = daily.reduce((s, d) => s + d.revenueNet, 0)
+  const openRate = openDaysSoFar / daysElapsed
+  const remainingDays = totalDays - daysElapsed
+  const projectedOpenDaysRemaining = Math.round(openRate * remainingDays)
+  const projectedOpenDays = openDaysSoFar + projectedOpenDaysRemaining
+  const avgRevenue = actualRevenue / openDaysSoFar
+  const projectedRevenue = Math.round(actualRevenue + avgRevenue * projectedOpenDaysRemaining)
+
+  const custDays = daily.map(d => salesDetails[d.date]).filter((s): s is SalesDetail => !!s?.customers)
+  const actualCustomers = custDays.length > 0 ? custDays.reduce((s, d) => s + d.customers, 0) : null
+  const projectedCustomers = actualCustomers !== null && custDays.length > 0
+    ? Math.round(actualCustomers + (actualCustomers / custDays.length) * projectedOpenDaysRemaining)
+    : null
+
+  return {
+    month, daysElapsed, totalDays, openDaysSoFar, projectedOpenDays,
+    actualRevenue, projectedRevenue, actualCustomers, projectedCustomers,
+  }
+}
+
 export interface WeekdayStat {
   dow: number
   label: string
