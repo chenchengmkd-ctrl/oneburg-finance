@@ -4,6 +4,7 @@ import { fmt, fmtShort, todayStr } from '../../utils/calculations'
 import {
   monthsOf, calcMonthStats, calcWeekdayStats, calcDailySeries, compareGroups, flVerdict,
   rankItems, calcCustomerWeekday, calcHourly, summarizeCustomers, calcWeeklyStats, calcMonthForecast,
+  calcCashflowWeeks,
 } from '../../utils/analyticsCalc'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, BarChart,
@@ -43,11 +44,11 @@ function DiffBadge({ diff }: { diff: number }) {
 }
 
 export default function Analytics() {
-  const { reports, loadReports, salesDetails, loadSalesDetails, setPage } = useAppStore()
+  const { reports, loadReports, salesDetails, loadSalesDetails, cashflowRecords, loadCashflowRecords, setPage } = useAppStore()
   const [compareBy, setCompareBy] = useState<'label' | 'vendor'>('label')
   const todayIso = todayStr()
 
-  useEffect(() => { loadReports(); loadSalesDetails() }, [])
+  useEffect(() => { loadReports(); loadSalesDetails(); loadCashflowRecords() }, [])
 
   const months = useMemo(() => monthsOf(reports), [reports])
   const monthStats = useMemo(() => calcMonthStats(reports, months), [reports, months])
@@ -74,6 +75,12 @@ export default function Analytics() {
   const custWeekday = useMemo(() => calcCustomerWeekday(details), [details])
   const hourly = useMemo(() => calcHourly(details), [details])
   const custSummary = useMemo(() => summarizeCustomers(details), [details])
+
+  // Squareの現金／現金以外の内訳。過去分すべてを週（木〜水）単位でまとめる
+  const cashflowWeeks = useMemo(
+    () => calcCashflowWeeks(Object.values(cashflowRecords)),
+    [cashflowRecords],
+  )
 
   if (!latest) {
     return (
@@ -406,6 +413,60 @@ export default function Analytics() {
           <div className="font-bold text-gray-700 mb-1">出数・客数はまだ取り込まれていません</div>
           LINEで「<span className="font-mono">出数取込 2026-07</span>」のように送ると、その月のレジ明細を取り込みます。
           取り込むと、商品ごとの売れた個数・客数・客単価・時間帯の混み具合がここに出ます。
+        </div>
+      )}
+
+      {/* 資金繰り（現金／現金以外）。Squareの精算サイクル（木〜水）に合わせた週区切りで、過去分すべて表示する。
+          LINE側は先週分だけの簡易版なので、全期間はこちらで見る */}
+      {cashflowWeeks.length > 0 ? (
+        <>
+          <p className="section-header">資金繰り（現金／現金以外）／ 週区切りは木〜水（Squareの振込サイクルに合わせています）</p>
+          <div className="card mb-6">
+            <div className="h-52 -ml-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={cashflowWeeks.map(w => ({ 週: w.label, 現金: w.cash, 現金以外: w.noncash }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+                  <XAxis dataKey="週" tick={{ fontSize: 11 }}/>
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${Math.round(v / 1000)}千`}/>
+                  <Tooltip formatter={(v) => fmt(Number(v))}/>
+                  <Legend wrapperStyle={{ fontSize: 12 }}/>
+                  <Bar dataKey="現金" stackId="c" fill="#F57F17" radius={[0, 0, 0, 0]}/>
+                  <Bar dataKey="現金以外" stackId="c" fill="#1565C0" radius={[3, 3, 0, 0]}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full text-sm min-w-[620px]">
+                <thead>
+                  <tr className="border-b border-gray-100 text-gray-400 text-xs">
+                    <th className="text-left py-2 pr-3">週（木〜水）</th>
+                    <th className="text-right pr-3">日数</th>
+                    <th className="text-right pr-3">現金</th>
+                    <th className="text-right pr-3">現金 平均/日</th>
+                    <th className="text-right pr-3">現金以外</th>
+                    <th className="text-right">現金以外 平均/日</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...cashflowWeeks].reverse().map(w => (
+                    <tr key={w.weekStart} className="border-b border-gray-50">
+                      <td className="py-1.5 pr-3 font-bold text-gray-700">{w.label}</td>
+                      <td className="text-right pr-3 text-gray-500">{w.days}日</td>
+                      <td className="text-right pr-3 text-amber-700 font-bold">{fmtShort(w.cash)}</td>
+                      <td className="text-right pr-3 text-amber-600">{fmtShort(w.avgCash)}</td>
+                      <td className="text-right pr-3 text-blue-700 font-bold">{fmtShort(w.noncash)}</td>
+                      <td className="text-right text-blue-600">{fmtShort(w.avgNoncash)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="card mb-6 text-sm text-gray-500">
+          <div className="font-bold text-gray-700 mb-1">現金／現金以外の内訳はまだ取り込まれていません</div>
+          LINEで「<span className="font-mono">出数取込 2026-07</span>」を送ると、出数と一緒にこちらも取り込まれます。
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import type { BalanceReport, ExpenseCategory, SalesDetail } from '../types'
+import type { BalanceReport, ExpenseCategory, SalesDetail, CashflowRecord } from '../types'
 import { calcPL, calcDailyPL, groupLedger } from './plCalc'
 import type { PLGroupRow } from './plCalc'
 import { WD_JP } from './calculations'
@@ -76,6 +76,57 @@ const mondayOf = (dateIso: string): string => {
 }
 
 const shortDate = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`
+
+/**
+ * その日を含む「精算週」の木曜日（YYYY-MM-DD）。SquareがLINEボット側で使っている
+ * 精算サイクル（木曜0:00〜翌水曜23:59に発生した現金以外の売上が、次の金曜にまとめて振り込まれる）
+ * に揃えるため、月曜始まりの週（mondayOf）とは別に木曜始まりで区切る。
+ */
+const thursdayOf = (dateIso: string): string => {
+  const d = new Date(dateIso)
+  const diff = (d.getDay() - 4 + 7) % 7   // 0=日…4=木
+  d.setDate(d.getDate() - diff)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+export interface CashflowWeekStat {
+  weekStart: string
+  label: string
+  days: number
+  cash: number
+  noncash: number
+  avgCash: number
+  avgNoncash: number
+}
+
+/** 精算週（木〜水）ごとの現金／現金以外の内訳。過去分すべてを対象にする（LINE通知は先週だけの簡易版） */
+export const calcCashflowWeeks = (records: CashflowRecord[]): CashflowWeekStat[] => {
+  const acc = new Map<string, { days: number; cash: number; noncash: number }>()
+  for (const r of records) {
+    const wk = thursdayOf(r.date)
+    const a = acc.get(wk) ?? { days: 0, cash: 0, noncash: 0 }
+    a.days += 1
+    a.cash += r.cash
+    a.noncash += r.noncash
+    acc.set(wk, a)
+  }
+  return [...acc.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([weekStart, a]) => {
+      const end = new Date(weekStart)
+      end.setDate(end.getDate() + 6)
+      const endIso = `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`
+      return {
+        weekStart,
+        label: `${shortDate(weekStart)}〜${shortDate(endIso)}`,
+        days: a.days,
+        cash: a.cash,
+        noncash: a.noncash,
+        avgCash: a.days > 0 ? Math.round(a.cash / a.days) : 0,
+        avgNoncash: a.days > 0 ? Math.round(a.noncash / a.days) : 0,
+      }
+    })
+}
 
 export interface WeekStat {
   weekStart: string

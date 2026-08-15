@@ -16,6 +16,16 @@ export interface SalesDetail {
   byHour: Record<string, number>  // 時間帯（JST）ごとの会計数
 }
 
+// Squareの現金／現金以外の内訳（LINEボット側が birdmen:cashflow:YYYY-MM-DD に書き込む）。
+// アプリからは読むだけ。現金以外（カード・電子マネー等）は「木曜0:00〜翌水曜23:59に発生した分が
+// 次の金曜に振り込まれる」というSquareの精算サイクルの対象になる
+export interface CashflowRecord {
+  date: string
+  cash: number      // 税込
+  noncash: number   // 税込
+  total: number      // 税込
+}
+
 // 初期設定
 export interface Settings {
   targetMonth: string          // 管理対象月 YYYY-MM

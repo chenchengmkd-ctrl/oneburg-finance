@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern, SalesDetail } from '../types'
+import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern, SalesDetail, CashflowRecord } from '../types'
 import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, defaultShiftPattern, migrateShiftPattern, migrateReport } from '../utils/storage'
 
 interface AppState {
@@ -52,6 +52,10 @@ interface AppState {
   // Squareのレジ明細（出数・客数）。ボットが書き込み、アプリは読むだけ
   salesDetails: Record<string, SalesDetail>
   loadSalesDetails: () => Promise<void>
+
+  // Squareの現金／現金以外の内訳。ボットが書き込み、アプリは読むだけ
+  cashflowRecords: Record<string, CashflowRecord>
+  loadCashflowRecords: () => Promise<void>
 
   // 選択中の日付
   selectedDate: string
@@ -184,5 +188,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (d?.date) salesDetails[d.date] = d
     }
     set({ salesDetails })
+  },
+
+  cashflowRecords: {},
+  loadCashflowRecords: async () => {
+    const keys = await storage.keys('cashflow:')
+    const fetched = await Promise.all(keys.map(key => storage.get<CashflowRecord>(key)))
+    const cashflowRecords: Record<string, CashflowRecord> = {}
+    for (const r of fetched) {
+      if (r?.date) cashflowRecords[r.date] = r
+    }
+    set({ cashflowRecords })
   },
 }))
