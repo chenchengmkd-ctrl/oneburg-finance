@@ -4,7 +4,7 @@ import { fmt, fmtShort, todayStr } from '../../utils/calculations'
 import {
   monthsOf, calcMonthStats, calcWeekdayStats, calcDailySeries, compareGroups, flVerdict,
   rankItems, calcCustomerWeekday, calcHourly, summarizeCustomers, calcWeeklyStats, calcMonthForecast,
-  calcCashflowWeeks,
+  calcCashflowWeeks, summarizeUsage,
 } from '../../utils/analyticsCalc'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, BarChart,
@@ -75,6 +75,7 @@ export default function Analytics() {
   const custWeekday = useMemo(() => calcCustomerWeekday(details), [details])
   const hourly = useMemo(() => calcHourly(details), [details])
   const custSummary = useMemo(() => summarizeCustomers(details), [details])
+  const usageSummary = useMemo(() => summarizeUsage(details), [details])
 
   // Squareの現金／現金以外の内訳。過去分すべてを週（木〜水）単位でまとめる
   const cashflowWeeks = useMemo(
@@ -335,6 +336,15 @@ export default function Analytics() {
             <StatCard label="商品数" value={`${itemRanks.length}品`}
               sub="この期間に1つ以上売れたもの"/>
           </div>
+
+          {usageSummary.days > 0 && (
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <StatCard label="鰻の使用尾数（合計）" value={`約${usageSummary.tails}尾`}
+                sub={`1日あたり 約${usageSummary.avgTails}尾（${usageSummary.days}日分）`}/>
+              <StatCard label="ご飯の使用量（合計）" value={`約${usageSummary.riceKg}kg`}
+                sub={`1日あたり 約${usageSummary.avgRiceKg}kg（鰻重系 ${usageSummary.servings}食分）`}/>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
             {/* 出数ランキング */}

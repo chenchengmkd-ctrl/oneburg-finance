@@ -7,6 +7,14 @@ export interface SalesItem {
   amount: number   // 税込
 }
 
+// 鰻・ご飯の使用量目安（出数から逆算。特上1.5尾／上1尾／並0.5尾、ご飯は1食250g換算。
+// 対象は品名に「鰻重」を含むものだけ）
+export interface UsageEstimate {
+  tails: number     // 鰻の使用尾数
+  servings: number  // 鰻重系の販売数
+  riceKg: number    // ご飯の使用量（kg）
+}
+
 export interface SalesDetail {
   date: string
   customers: number       // 会計数（＝組数）
@@ -14,6 +22,7 @@ export interface SalesDetail {
   perCustomer: number     // 客単価
   items: SalesItem[]      // 金額の大きい順
   byHour: Record<string, number>  // 時間帯（JST）ごとの会計数
+  usage?: UsageEstimate   // 2026-08-16以降に取り込んだ日のみ持つ（それ以前の記録は未取込）
 }
 
 // Squareの現金／現金以外の内訳（LINEボット側が birdmen:cashflow:YYYY-MM-DD に書き込む）。

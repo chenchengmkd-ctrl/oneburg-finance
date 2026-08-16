@@ -426,6 +426,29 @@ export const summarizeCustomers = (details: SalesDetail[]): CustomerSummary => {
   }
 }
 
+export interface UsageSummary {
+  days: number         // usageを持つ日数（2026-08-16より前の記録は含まれない）
+  tails: number
+  servings: number
+  riceKg: number
+  avgTails: number
+  avgRiceKg: number
+}
+
+/** 期間内の鰻・ご飯の使用量合計と1日平均（出数から逆算した目安。usageを持つ日だけを対象にする） */
+export const summarizeUsage = (details: SalesDetail[]): UsageSummary => {
+  const withUsage = details.filter(d => d.usage && d.usage.servings > 0)
+  const days = withUsage.length
+  const tails = withUsage.reduce((s, d) => s + (d.usage?.tails ?? 0), 0)
+  const servings = withUsage.reduce((s, d) => s + (d.usage?.servings ?? 0), 0)
+  const riceKg = withUsage.reduce((s, d) => s + (d.usage?.riceKg ?? 0), 0)
+  return {
+    days, tails: Math.round(tails * 10) / 10, servings, riceKg: Math.round(riceKg * 100) / 100,
+    avgTails: days > 0 ? Math.round((tails / days) * 10) / 10 : 0,
+    avgRiceKg: days > 0 ? Math.round((riceKg / days) * 100) / 100 : 0,
+  }
+}
+
 /** FL比率の評価。飲食店の一般的な目安に照らして色分けするために使う */
 export const flVerdict = (flRate: number | null): 'good' | 'warn' | 'bad' | null => {
   if (flRate === null) return null
