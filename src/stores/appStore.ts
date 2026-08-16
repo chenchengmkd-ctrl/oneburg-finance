@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern, SalesDetail, CashflowRecord } from '../types'
+import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern, SalesDetail, CashflowRecord, CfPlan } from '../types'
+import { emptyCfPlan, migrateCfPlan } from '../utils/cashflowCalc'
 import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, defaultShiftPattern, migrateShiftPattern, migrateReport } from '../utils/storage'
 
 interface AppState {
@@ -56,6 +57,11 @@ interface AppState {
   // Squareの現金／現金以外の内訳。ボットが書き込み、アプリは読むだけ
   cashflowRecords: Record<string, CashflowRecord>
   loadCashflowRecords: () => Promise<void>
+
+  // 週次CF予想の計画（変動支出の予定など）。LINEボットと共有し、アプリからも編集する
+  cfPlan: CfPlan
+  loadCfPlan: () => Promise<void>
+  saveCfPlan: (data: CfPlan) => Promise<void>
 
   // 選択中の日付
   selectedDate: string
@@ -199,5 +205,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (r?.date) cashflowRecords[r.date] = r
     }
     set({ cashflowRecords })
+  },
+
+  cfPlan: emptyCfPlan(),
+  loadCfPlan: async () => {
+    const raw = await storage.get<unknown>('cf-plan')
+    set({ cfPlan: migrateCfPlan(raw) })
+  },
+  saveCfPlan: async (data) => {
+    set({ cfPlan: data })
+    await storage.set('cf-plan', data)
   },
 }))

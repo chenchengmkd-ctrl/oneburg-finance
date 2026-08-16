@@ -6,6 +6,7 @@ import { upcomingPayments, totalByBucket, netCashflow, nextOccurrence } from '..
 import type { ScheduledPayment, PaymentCategory, PaymentDirection } from '../../types'
 import { Plus, Trash2, AlertTriangle, Landmark, ArrowDownCircle, ArrowUpCircle } from 'lucide-react'
 import NumberInput from '../common/NumberInput'
+import CashflowCalendar from './CashflowCalendar'
 
 const CATEGORY_INFO: Record<PaymentCategory, { label: string; hint: string; bg: string; text: string }> = {
   fixed:    { label: '固定',   hint: '毎月同じ日・同じ金額', bg: 'bg-blue-50',  text: 'text-blue-700' },
@@ -88,6 +89,8 @@ export default function Payments() {
         <h1 className="text-2xl font-bold text-gray-800">資金繰り予定</h1>
         <p className="text-gray-400 text-sm mt-1">収入・支出の予定をまとめて登録し、いつ・どのくらい資金が足りなくなるかを自動で見える化します</p>
       </div>
+
+      <CashflowCalendar />
 
       {/* 資金ショート予測 */}
       <p className="section-header">資金ショート予測</p>

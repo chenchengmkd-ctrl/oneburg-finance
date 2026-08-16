@@ -35,6 +35,22 @@ export interface CashflowRecord {
   total: number      // 税込
 }
 
+// 週次CF予想の計画（birdmen:cf-plan）。LINEボット側と共有する。
+// 履歴から導出できないものだけを持つ：バイト収入・鰻仕入の回数と、日ごとの変動支出予定
+export interface PlannedExpense {
+  id: string
+  name: string
+  amount: number   // 税込
+}
+
+export interface CfPlan {
+  partTimeCount: number    // バイト収入の週あたり回数
+  partTimeAmount: number   // 1回あたりの金額
+  unagiPerWeek: number     // 鰻仕入の週あたり回数（カレンダーでは日付指定の予定として入れる）
+  unagiAmount: number      // 1回あたりの金額（0なら履歴の直近額）
+  planned: Record<string, PlannedExpense[]>  // 日付(YYYY-MM-DD) → その日に予定している変動支出
+}
+
 // 初期設定
 export interface Settings {
   targetMonth: string          // 管理対象月 YYYY-MM
