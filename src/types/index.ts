@@ -35,20 +35,22 @@ export interface CashflowRecord {
   total: number      // 税込
 }
 
-// 週次CF予想の計画（birdmen:cf-plan）。LINEボット側と共有する。
-// 履歴から導出できないものだけを持つ：バイト収入・鰻仕入の回数と、日ごとの変動支出予定
-export interface PlannedExpense {
+// 資金繰りカレンダー（birdmen:cf-plan）。LINEボット側と共有する。
+// 現金売上とSquare入金は実績から見込みを立てるが手修正でき、それ以外は全部手入力する。
+// 固定費／変動費という区別は持たない（どちらも「その日に動くお金」なのでカテゴリだけで分ける）
+export type CfRowKind = 'cashSales' | 'deposit' | 'personal' | 'ingredient' | 'supplies' | 'other'
+
+export interface CfEntry {
   id: string
   name: string
   amount: number   // 税込
 }
 
 export interface CfPlan {
-  partTimeCount: number    // バイト収入の週あたり回数
-  partTimeAmount: number   // 1回あたりの金額
-  unagiPerWeek: number     // 鰻仕入の週あたり回数（カレンダーでは日付指定の予定として入れる）
-  unagiAmount: number      // 1回あたりの金額（0なら履歴の直近額）
-  planned: Record<string, PlannedExpense[]>  // 日付(YYYY-MM-DD) → その日に予定している変動支出
+  // 日付(YYYY-MM-DD) → 行種別 → 明細。個人収入・食品・備品・その他が入る
+  entries: Record<string, Partial<Record<CfRowKind, CfEntry[]>>>
+  // 日付 → 見込みの手修正（入れた日はその値を使う）
+  overrides: Record<string, { cashSales?: number; deposit?: number }>
 }
 
 // 初期設定

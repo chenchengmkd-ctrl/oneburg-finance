@@ -1,158 +1,267 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { fmt, fmtShort, todayStr } from '../../utils/calculations'
-import { buildCfWeek, nextMonday, mondayOf, newPlannedExpense } from '../../utils/cashflowCalc'
-import type { PlannedExpense } from '../../types'
+import { fmt, fmtShort, todayStr, WD_JP } from '../../utils/calculations'
+import {
+  buildCfGrid, nextMonday, mondayOf, weekDates, monthDates, shiftMonth,
+  newCfEntry, ENTRY_ROWS, ROW_LABEL,
+} from '../../utils/cashflowCalc'
+import type { CfEntry, CfRowKind } from '../../types'
 import NumberInput from '../common/NumberInput'
-import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, RotateCcw } from 'lucide-react'
 
-// 変動支出の1行。カレンダー内で直接足し引きする
-function PlannedRow({ item, onUpdate, onRemove }: {
-  item: PlannedExpense
-  onUpdate: (patch: Partial<PlannedExpense>) => void
-  onRemove: () => void
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <input type="text" value={item.name} placeholder="内容"
-        onChange={e => onUpdate({ name: e.target.value })}
-        className="flex-1 min-w-0 text-xs border border-gray-200 rounded px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-orange-300"/>
-      <NumberInput value={item.amount} onChange={v => onUpdate({ amount: v })}
-        className="w-20 shrink-0 text-right text-xs border border-gray-200 rounded px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-orange-300"/>
-      <button onClick={onRemove} className="text-gray-300 hover:text-red-500 shrink-0"><X size={12}/></button>
-    </div>
-  )
-}
+type Mode = 'week' | 'month'
+
+// 選択中のマス（日付×行）。ここだけ明細を開いて編集する
+interface Focus { date: string; kind: CfRowKind }
 
 export default function CashflowCalendar() {
-  const {
-    cashflowRecords, loadCashflowRecords, reports, loadReports,
-    cfPlan, loadCfPlan, saveCfPlan,
-  } = useAppStore()
+  const { cashflowRecords, loadCashflowRecords, cfPlan, loadCfPlan, saveCfPlan } = useAppStore()
 
   const today = todayStr()
+  const [mode, setMode] = useState<Mode>('week')
   const [weekStart, setWeekStart] = useState(() => nextMonday(today))
+  const [month, setMonth] = useState(() => today.slice(0, 7))
+  const [focus, setFocus] = useState<Focus | null>(null)
 
-  useEffect(() => { loadCashflowRecords(); loadReports(); loadCfPlan() }, [])
+  useEffect(() => { loadCashflowRecords(); loadCfPlan() }, [])
 
-  const week = useMemo(
-    () => buildCfWeek(weekStart, cashflowRecords, reports, cfPlan),
-    [weekStart, cashflowRecords, reports, cfPlan],
+  const dates = useMemo(
+    () => (mode === 'week' ? weekDates(weekStart) : monthDates(month)),
+    [mode, weekStart, month],
+  )
+  const grid = useMemo(
+    () => buildCfGrid(dates, cashflowRecords, cfPlan),
+    [dates, cashflowRecords, cfPlan],
   )
 
-  // 変動支出の編集。連続で触っても取りこぼさないよう、保存直前に最新のcfPlanを読み直して差分を当てる
-  const patchPlanned = (date: string, apply: (cur: PlannedExpense[]) => PlannedExpense[]) => {
+  // 連続で触っても取りこぼさないよう、保存直前に最新のcfPlanを読み直して差分を当てる
+  const patchEntries = (date: string, kind: CfRowKind, apply: (cur: CfEntry[]) => CfEntry[]) => {
     const cur = useAppStore.getState().cfPlan
-    const next = apply(cur.planned[date] ?? [])
-    const planned = { ...cur.planned }
-    if (next.length > 0) planned[date] = next
-    else delete planned[date]
-    saveCfPlan({ ...cur, planned })
+    const next = apply(cur.entries[date]?.[kind] ?? [])
+    const forDate = { ...cur.entries[date] }
+    if (next.length > 0) forDate[kind] = next
+    else delete forDate[kind]
+
+    const entries = { ...cur.entries }
+    if (Object.keys(forDate).length > 0) entries[date] = forDate
+    else delete entries[date]
+    saveCfPlan({ ...cur, entries })
+  }
+
+  const setOverride = (date: string, kind: 'cashSales' | 'deposit', value: number | null) => {
+    const cur = useAppStore.getState().cfPlan
+    const forDate = { ...cur.overrides[date] }
+    if (value === null) delete forDate[kind]
+    else forDate[kind] = value
+
+    const overrides = { ...cur.overrides }
+    if (Object.keys(forDate).length > 0) overrides[date] = forDate
+    else delete overrides[date]
+    saveCfPlan({ ...cur, overrides })
   }
 
   const shiftWeek = (delta: number) => {
     const d = new Date(weekStart)
     d.setDate(d.getDate() + delta * 7)
     setWeekStart(mondayOf(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`))
+    setFocus(null)
   }
 
-  const positive = week.net >= 0
+  const positive = grid.net >= 0
+  const focusCell = focus ? grid.rows.find(r => r.kind === focus.kind)?.cells[focus.date] : null
+  const isProjectedFocus = focus?.kind === 'cashSales' || focus?.kind === 'deposit'
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <p className="section-header mb-0">週次CF予想（カレンダー）</p>
-        <div className="flex items-center gap-1">
-          <button onClick={() => shiftWeek(-1)} className="p-1 rounded hover:bg-gray-200 transition"><ChevronLeft size={16}/></button>
-          <button onClick={() => setWeekStart(nextMonday(today))}
-            className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">来週</button>
-          <button onClick={() => shiftWeek(1)} className="p-1 rounded hover:bg-gray-200 transition"><ChevronRight size={16}/></button>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="section-header mb-0">資金繰りカレンダー</p>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {([['week', '週間'], ['month', '月間']] as const).map(([id, text]) => (
+              <button key={id} onClick={() => { setMode(id); setFocus(null) }}
+                className={`px-2.5 py-1 rounded text-xs font-bold transition ${mode === id ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                {text}
+              </button>
+            ))}
+          </div>
+          {mode === 'week' ? (
+            <div className="flex items-center gap-1">
+              <button onClick={() => shiftWeek(-1)} className="p-1 rounded hover:bg-gray-200"><ChevronLeft size={16}/></button>
+              <button onClick={() => { setWeekStart(nextMonday(today)); setFocus(null) }}
+                className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">来週</button>
+              <button onClick={() => shiftWeek(1)} className="p-1 rounded hover:bg-gray-200"><ChevronRight size={16}/></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setMonth(m => shiftMonth(m, -1)); setFocus(null) }} className="p-1 rounded hover:bg-gray-200"><ChevronLeft size={16}/></button>
+              <span className="text-xs font-bold text-gray-600 w-16 text-center">{month.replace('-', '/')}</span>
+              <button onClick={() => { setMonth(m => shiftMonth(m, 1)); setFocus(null) }} className="p-1 rounded hover:bg-gray-200"><ChevronRight size={16}/></button>
+            </div>
+          )}
         </div>
       </div>
       <p className="text-[11px] text-gray-400 mt-1 mb-2">
-        金額は税込。現金売上とSquare入金は<strong className="text-gray-500">曜日ごとの実績平均</strong>からの見込みです
-        （実績がある日はその値）。家賃・光熱費は履歴から自動、それ以外の支出は各日に直接入力できます
+        金額は税込。現金売上とSquare入金は<strong className="text-gray-500">曜日ごとの実績平均</strong>から見込みを立てています
+        （マスを押せば手修正できます）。それ以外は各マスを押して入力してください
       </p>
 
-      {/* 週サマリー */}
+      {/* サマリー */}
       <div className={`card border-l-4 mb-3 ${positive ? 'border-green-500' : 'border-red-500'}`}>
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
           <div>
-            <div className="card-header">週次収支（{week.days[0].label.slice(0, -3)}〜{week.days[6].label.slice(0, -3)}）</div>
+            <div className="card-header">
+              {mode === 'week' ? '週次収支' : '月次収支'}（{grid.columns[0].label}〜{grid.columns[grid.columns.length - 1].label}）
+            </div>
             <div className={`text-3xl font-black ${positive ? 'text-green-600' : 'text-red-600'}`}>
-              {positive ? '+' : ''}{fmt(week.net)}
+              {positive ? '+' : ''}{fmt(grid.net)}
             </div>
           </div>
           <div className="text-xs text-gray-500 space-y-0.5">
-            <div>収入 {fmt(week.incomeTotal)}{week.partTime > 0 && `（うちバイト ${fmtShort(week.partTime)}）`}</div>
-            <div>支出 {fmt(week.expenseTotal)}</div>
+            <div>収入 {fmt(grid.incomeTotal)}</div>
+            <div>支出 {fmt(grid.expenseTotal)}</div>
           </div>
           <div className="ml-auto text-right">
             <div className="text-[11px] text-gray-400">1日あたり必要な現金売上</div>
-            <div className="text-lg font-black text-gray-700">{fmt(week.breakevenPerDay)}</div>
+            <div className="text-lg font-black text-gray-700">{fmt(grid.breakevenPerDay)}</div>
           </div>
         </div>
       </div>
 
-      {/* 日別カレンダー */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {week.days.map(d => {
-          const isPast = d.date < today
-          const isToday = d.date === today
-          return (
-            <div key={d.date}
-              className={`card ${isToday ? 'ring-2 ring-blue-400' : ''} ${isPast ? 'opacity-70' : ''}`}>
-              <div className="flex items-baseline justify-between mb-2">
-                <span className={`text-sm font-bold ${d.isWeekend ? 'text-red-500' : 'text-gray-700'}`}>{d.label}</span>
-                <span className={`text-sm font-black ${d.net >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {d.net >= 0 ? '+' : ''}{fmtShort(d.net)}
-                </span>
-              </div>
+      {/* 縦＝カテゴリ、横＝日付のグリッド。月間は横に長くなるのでスクロールさせる */}
+      <div className="card overflow-x-auto mb-3">
+        <table className="text-sm border-separate border-spacing-0">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 bg-white text-left text-xs text-gray-400 font-normal py-2 pr-3 border-b border-gray-100 min-w-[6rem]">　</th>
+              {grid.columns.map(c => (
+                <th key={c.date}
+                  className={`text-right text-xs font-normal py-2 px-2 border-b border-gray-100 min-w-[4.5rem] ${
+                    c.date === today ? 'bg-blue-50 font-bold text-blue-700' : c.isWeekend ? 'text-red-500' : 'text-gray-400'}`}>
+                  {c.label}<span className="ml-0.5">({WD_JP[c.dow]})</span>
+                </th>
+              ))}
+              <th className="sticky right-0 z-10 bg-white text-right text-xs text-gray-500 font-bold py-2 pl-3 border-b border-gray-100 min-w-[5.5rem]">合計</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grid.rows.map((row, i) => (
+              <tr key={row.kind} className={!row.isIncome && grid.rows[i - 1]?.isIncome ? 'border-t-2' : ''}>
+                <td className={`sticky left-0 z-10 bg-white py-1.5 pr-3 text-xs font-bold whitespace-nowrap ${
+                  row.isIncome ? 'text-blue-700' : 'text-orange-700'} ${!row.isIncome && grid.rows[i - 1]?.isIncome ? 'border-t-2 border-gray-200' : ''}`}>
+                  {row.label}
+                </td>
+                {grid.columns.map(c => {
+                  const cell = row.cells[c.date]
+                  const selected = focus?.date === c.date && focus?.kind === row.kind
+                  return (
+                    <td key={c.date}
+                      className={`p-0 ${!row.isIncome && grid.rows[i - 1]?.isIncome ? 'border-t-2 border-gray-200' : ''}`}>
+                      <button onClick={() => setFocus(selected ? null : { date: c.date, kind: row.kind })}
+                        className={`w-full text-right px-2 py-1.5 text-xs transition ${
+                          selected ? 'bg-blue-100 ring-1 ring-blue-400' : 'hover:bg-gray-50'} ${
+                          cell.amount === 0 ? 'text-gray-300' : row.isIncome ? 'text-blue-700 font-bold' : 'text-orange-700 font-bold'}`}>
+                        {cell.amount === 0 ? '·' : fmtShort(cell.amount)}
+                        {cell.isOverridden && <span className="text-[9px] text-purple-500 ml-0.5">修</span>}
+                      </button>
+                    </td>
+                  )
+                })}
+                <td className={`sticky right-0 z-10 bg-white text-right py-1.5 pl-3 text-xs font-black whitespace-nowrap ${
+                  row.isIncome ? 'text-blue-700' : 'text-orange-700'} ${!row.isIncome && grid.rows[i - 1]?.isIncome ? 'border-t-2 border-gray-200' : ''}`}>
+                  {fmtShort(row.total)}
+                </td>
+              </tr>
+            ))}
 
-              <div className="space-y-0.5 text-[11px] mb-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">{isPast ? '現金売上' : '現金売上（見込）'}</span>
-                  <span className="text-blue-700 font-bold">{fmtShort(d.cashSales)}</span>
-                </div>
-                {d.deposit > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Square入金</span>
-                    <span className="text-blue-700 font-bold">{fmtShort(d.deposit)}</span>
-                  </div>
+            <tr className="border-t-2">
+              <td className="sticky left-0 z-10 bg-white py-2 pr-3 text-xs font-bold text-gray-700 border-t-2 border-gray-300">日次収支</td>
+              {grid.columns.map(c => (
+                <td key={c.date} className={`text-right px-2 py-2 text-xs font-black border-t-2 border-gray-300 ${
+                  grid.dailyNet[c.date] >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {grid.dailyNet[c.date] >= 0 ? '+' : ''}{fmtShort(grid.dailyNet[c.date])}
+                </td>
+              ))}
+              <td className={`sticky right-0 z-10 bg-white text-right py-2 pl-3 text-xs font-black border-t-2 border-gray-300 ${
+                positive ? 'text-green-600' : 'text-red-600'}`}>
+                {positive ? '+' : ''}{fmtShort(grid.net)}
+              </td>
+            </tr>
+            <tr>
+              <td className="sticky left-0 z-10 bg-white py-1.5 pr-3 text-xs text-gray-400">累計</td>
+              {grid.columns.map(c => (
+                <td key={c.date} className={`text-right px-2 py-1.5 text-xs ${
+                  grid.cumulative[c.date] >= 0 ? 'text-gray-500' : 'text-red-500 font-bold'}`}>
+                  {fmtShort(grid.cumulative[c.date])}
+                </td>
+              ))}
+              <td className="sticky right-0 z-10 bg-white"/>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* 選択したマスの入力欄 */}
+      {focus && focusCell && (
+        <div className="card mb-6 border-l-4 border-blue-400">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-bold text-gray-700">
+              {focus.date.slice(5).replace('-', '/')}（{WD_JP[new Date(focus.date).getDay()]}）の{ROW_LABEL[focus.kind]}
+            </span>
+            <button onClick={() => setFocus(null)} className="text-gray-300 hover:text-gray-600"><X size={16}/></button>
+          </div>
+
+          {isProjectedFocus ? (
+            <>
+              <div className="flex items-center gap-2">
+                <NumberInput value={focusCell.amount}
+                  onChange={v => setOverride(focus.date, focus.kind as 'cashSales' | 'deposit', v)}
+                  className="w-40 text-right text-lg font-bold border-2 border-gray-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                {focusCell.isOverridden && (
+                  <button onClick={() => setOverride(focus.date, focus.kind as 'cashSales' | 'deposit', null)}
+                    className="flex items-center gap-1 text-xs text-gray-500 border border-gray-200 rounded px-2 py-1.5 hover:bg-gray-50">
+                    <RotateCcw size={12}/> 見込みに戻す
+                  </button>
                 )}
-                {d.fixed.map(f => (
-                  <div key={f.name} className="flex justify-between">
-                    <span className="text-gray-400">{f.name}（固定）</span>
-                    <span className="text-red-600 font-bold">-{fmtShort(f.amount)}</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                {focusCell.isOverridden
+                  ? '手修正した値を使っています'
+                  : focusCell.isActual
+                    ? 'Squareの実績です。書き換えると手修正になります'
+                    : '曜日ごとの実績平均からの見込みです。書き換えると手修正になります'}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                {focusCell.entries.map(e => (
+                  <div key={e.id} className="flex items-center gap-2">
+                    <input type="text" value={e.name} placeholder="内容" autoFocus={!e.name}
+                      onChange={ev => patchEntries(focus.date, focus.kind, cur => cur.map(x => x.id === e.id ? { ...x, name: ev.target.value } : x))}
+                      className="flex-1 min-w-0 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+                    <NumberInput value={e.amount}
+                      onChange={v => patchEntries(focus.date, focus.kind, cur => cur.map(x => x.id === e.id ? { ...x, amount: v } : x))}
+                      className="w-28 shrink-0 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+                    <button onClick={() => patchEntries(focus.date, focus.kind, cur => cur.filter(x => x.id !== e.id))}
+                      className="text-gray-300 hover:text-red-500 shrink-0"><X size={14}/></button>
                   </div>
                 ))}
+                {focusCell.entries.length === 0 && <div className="text-xs text-gray-300">まだありません</div>}
               </div>
+              <button onClick={() => patchEntries(focus.date, focus.kind, cur => [...cur, newCfEntry()])}
+                className="text-xs text-gray-600 mt-2 flex items-center gap-1 hover:text-gray-800">
+                <Plus size={12}/> 追加
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
-              <div className="border-t border-gray-100 pt-2">
-                <div className="text-[10px] text-gray-400 mb-1">変動支出</div>
-                <div className="space-y-1">
-                  {d.planned.map(p => (
-                    <PlannedRow key={p.id} item={p}
-                      onUpdate={patch => patchPlanned(d.date, cur => cur.map(x => x.id === p.id ? { ...x, ...patch } : x))}
-                      onRemove={() => patchPlanned(d.date, cur => cur.filter(x => x.id !== p.id))}/>
-                  ))}
-                </div>
-                <button onClick={() => patchPlanned(d.date, cur => [...cur, newPlannedExpense()])}
-                  className="text-[11px] text-gray-500 mt-1 flex items-center gap-1 hover:text-gray-700">
-                  <Plus size={10}/> 追加
-                </button>
-              </div>
-
-              <div className="border-t border-gray-100 mt-2 pt-1.5 flex justify-between text-[11px]">
-                <span className="text-gray-400">週の累計</span>
-                <span className={`font-bold ${d.cumulative >= 0 ? 'text-gray-600' : 'text-red-600'}`}>
-                  {d.cumulative >= 0 ? '+' : ''}{fmtShort(d.cumulative)}
-                </span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      {!focus && (
+        <p className="text-[11px] text-gray-400 mb-6">
+          入力できる行：{ENTRY_ROWS.map(k => ROW_LABEL[k]).join('・')}（マスを押すと明細を入れられます）
+        </p>
+      )}
     </>
   )
 }
