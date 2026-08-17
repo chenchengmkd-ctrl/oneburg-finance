@@ -46,11 +46,22 @@ export interface CfEntry {
   amount: number   // 税込
 }
 
+// 残高の記録。口座は分けず「手元にあるお金の合計」として1本で持つ。
+// 日次入力からは実際の銀行残高を導けない（銀行入金を記録していないため）ので、
+// 実際に通帳やアプリで見た額をそのまま記録し、そこから先を予定で伸ばす
+export interface BalanceSnapshot {
+  date: string     // 残高を確認した日
+  amount: number
+  note: string
+}
+
 export interface CfPlan {
   // 日付(YYYY-MM-DD) → 行種別 → 明細。個人収入・食品・備品・その他が入る
   entries: Record<string, Partial<Record<CfRowKind, CfEntry[]>>>
   // 日付 → 見込みの手修正（入れた日はその値を使う）
   overrides: Record<string, { cashSales?: number; deposit?: number }>
+  // 残高の記録（日付順に増えていく。最新のものを起点に見込みを伸ばす）
+  balances?: BalanceSnapshot[]
 }
 
 // 初期設定

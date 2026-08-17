@@ -7,7 +7,7 @@ import {
 } from '../../utils/cashflowCalc'
 import type { CfEntry, CfRowKind } from '../../types'
 import NumberInput from '../common/NumberInput'
-import { ChevronLeft, ChevronRight, Plus, X, RotateCcw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, RotateCcw, Wallet } from 'lucide-react'
 
 type Mode = 'week' | 'month'
 
@@ -22,6 +22,8 @@ export default function CashflowCalendar() {
   const [weekStart, setWeekStart] = useState(() => nextMonday(today))
   const [month, setMonth] = useState(() => today.slice(0, 7))
   const [focus, setFocus] = useState<Focus | null>(null)
+  const [balanceDate, setBalanceDate] = useState(today)
+  const [balanceDraft, setBalanceDraft] = useState(0)
 
   useEffect(() => { loadCashflowRecords(); loadCfPlan() }, [])
 
@@ -58,6 +60,21 @@ export default function CashflowCalendar() {
     if (Object.keys(forDate).length > 0) overrides[date] = forDate
     else delete overrides[date]
     saveCfPlan({ ...cur, overrides })
+  }
+
+  // 残高の記録。同じ日を入れ直したら上書きする（1日に何度も測らないので単純に置き換える）
+  const recordBalance = () => {
+    const cur = useAppStore.getState().cfPlan
+    const balances = [...(cur.balances ?? []).filter(b => b.date !== balanceDate),
+      { date: balanceDate, amount: balanceDraft, note: '' }]
+      .sort((a, b) => a.date.localeCompare(b.date))
+    saveCfPlan({ ...cur, balances })
+    setBalanceDraft(0)
+  }
+
+  const removeBalance = (date: string) => {
+    const cur = useAppStore.getState().cfPlan
+    saveCfPlan({ ...cur, balances: (cur.balances ?? []).filter(b => b.date !== date) })
   }
 
   const shiftWeek = (delta: number) => {
@@ -196,8 +213,93 @@ export default function CashflowCalendar() {
               ))}
               <td className="sticky right-0 z-10 bg-white"/>
             </tr>
+
+            {/* 残高の見込み。起点となる記録があるときだけ出す */}
+            {grid.startBalance && (
+              <tr>
+                <td className="sticky left-0 z-10 bg-white py-1.5 pr-3 text-xs font-bold text-teal-700 whitespace-nowrap">残高見込み</td>
+                {grid.columns.map(c => {
+                  const value = grid.balance[c.date]
+                  const isStart = c.date === grid.startBalance!.date
+                  return (
+                    <td key={c.date} className={`text-right px-2 py-1.5 text-xs font-bold ${
+                      value < 0 ? 'text-red-600' : isStart ? 'text-teal-800' : 'text-teal-600'} ${
+                      c.date === grid.lowestDate && value < 0 ? 'bg-red-50' : ''}`}>
+                      {fmtShort(value)}{isStart && <span className="text-[9px] text-gray-400 ml-0.5">実</span>}
+                    </td>
+                  )
+                })}
+                <td className="sticky right-0 z-10 bg-white"/>
+              </tr>
+            )}
           </tbody>
         </table>
+      </div>
+
+      {/* 残高の記録と、期間末の見込み */}
+      <div className="card mb-3">
+        <div className="flex items-center gap-1.5 mb-2">
+          <Wallet size={14} className="text-teal-700"/>
+          <span className="text-sm font-bold text-teal-700">残高</span>
+        </div>
+
+        {grid.startBalance ? (
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 mb-3">
+            <div>
+              <div className="text-[11px] text-gray-400">
+                {grid.startBalance.date.slice(5).replace('-', '/')}時点（記録した実額）
+              </div>
+              <div className="text-2xl font-black text-teal-800">{fmt(grid.startBalance.amount)}</div>
+            </div>
+            <div>
+              <div className="text-[11px] text-gray-400">
+                {grid.columns[grid.columns.length - 1].label}時点の見込み
+              </div>
+              <div className={`text-2xl font-black ${
+                grid.balance[grid.dates[grid.dates.length - 1]] < 0 ? 'text-red-600' : 'text-teal-600'}`}>
+                {fmt(grid.balance[grid.dates[grid.dates.length - 1]])}
+              </div>
+            </div>
+            {grid.lowestDate && grid.balance[grid.lowestDate] < 0 && (
+              <div className="text-xs text-red-600 font-bold">
+                ⚠️ {grid.lowestDate.slice(5).replace('-', '/')}に{fmt(grid.balance[grid.lowestDate])}まで下がる見込みです
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500 mb-3">
+            残高を1度記録すると、そこから予定を足し引きした<strong className="text-gray-700">日ごとの見込み残高</strong>が上の表に出ます。
+            日次入力からは実際の銀行残高が分からないため、通帳やアプリで見た額を入れてください
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-gray-100">
+          <div>
+            <div className="text-[10px] text-gray-400 mb-0.5">確認した日</div>
+            <input type="date" value={balanceDate} onChange={e => e.target.value && setBalanceDate(e.target.value)}
+              className="text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-300"/>
+          </div>
+          <div>
+            <div className="text-[10px] text-gray-400 mb-0.5">その時の残高</div>
+            <NumberInput value={balanceDraft} onChange={setBalanceDraft}
+              className="w-32 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-300"/>
+          </div>
+          <button onClick={recordBalance} disabled={balanceDraft <= 0}
+            className="flex items-center gap-1 text-xs bg-teal-700 text-white px-3 py-2 rounded font-bold hover:bg-teal-800 transition disabled:opacity-30">
+            <Plus size={12}/> 記録
+          </button>
+        </div>
+
+        {(cfPlan.balances ?? []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {[...(cfPlan.balances ?? [])].reverse().slice(0, 8).map(b => (
+              <span key={b.date} className="inline-flex items-center gap-1 text-[11px] bg-gray-100 text-gray-700 rounded px-2 py-1">
+                {b.date.slice(5).replace('-', '/')} {fmtShort(b.amount)}
+                <button onClick={() => removeBalance(b.date)} className="text-gray-400 hover:text-red-500"><X size={10}/></button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 選択したマスの入力欄 */}

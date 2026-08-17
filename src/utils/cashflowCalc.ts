@@ -1,4 +1,4 @@
-import type { CashflowRecord, CfPlan, CfEntry, CfRowKind } from '../types'
+import type { CashflowRecord, CfPlan, CfEntry, CfRowKind, BalanceSnapshot } from '../types'
 import { WD_JP } from './calculations'
 
 // 週次・月次のキャッシュフロー予想。損益ではなく「いつ・いくら現金が動くか」を見るためのものなので、
@@ -23,7 +23,7 @@ export const EXPENSE_ROWS: CfRowKind[] = ['ingredient', 'supplies', 'other']
 /** 手入力する行（見込みを立てる現金売上・Square入金以外） */
 export const ENTRY_ROWS: CfRowKind[] = ['personal', 'ingredient', 'supplies', 'other']
 
-export const emptyCfPlan = (): CfPlan => ({ entries: {}, overrides: {} })
+export const emptyCfPlan = (): CfPlan => ({ entries: {}, overrides: {}, balances: [] })
 
 /** 保存済みの値と既定値をマージする。項目が増えても古いデータが壊れないようにする */
 export const migrateCfPlan = (raw: unknown): CfPlan => {
@@ -34,8 +34,21 @@ export const migrateCfPlan = (raw: unknown): CfPlan => {
     if (!Array.isArray(items) || items.length === 0) continue
     entries[date] = { ...entries[date], other: [...(entries[date]?.other ?? []), ...items] }
   }
-  return { entries, overrides: r.overrides ?? {} }
+  return {
+    entries,
+    overrides: r.overrides ?? {},
+    balances: [...(r.balances ?? [])].sort((a, b) => a.date.localeCompare(b.date)),
+  }
 }
+
+/** 指定日以前で最も新しい残高の記録。無ければnull */
+export const latestBalanceOn = (plan: CfPlan, dateIso: string): BalanceSnapshot | null => {
+  const past = (plan.balances ?? []).filter(b => b.date <= dateIso)
+  return past.length > 0 ? past[past.length - 1] : null
+}
+
+export const newBalanceSnapshot = (date: string): BalanceSnapshot =>
+  ({ date, amount: 0, note: '' })
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 const iso = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
@@ -144,6 +157,10 @@ export interface CfGrid {
   dailyNet: Record<string, number>
   cumulative: Record<string, number>
   breakevenPerDay: number
+  // 残高の見込み。起点の記録があるときだけ入る
+  startBalance: BalanceSnapshot | null
+  balance: Record<string, number>   // その日の終わりの見込み残高
+  lowestDate: string | null         // 見込み残高がいちばん低くなる日
 }
 
 /** 縦＝カテゴリ、横＝日付のグリッドを組み立てる。週でも月でも同じ関数で作る */
@@ -220,11 +237,27 @@ export const buildCfGrid = (
   const openDays = dates.filter(d => cashRow.cells[d].amount > 0).length || dates.length
   const breakeven = Math.max(0, expenseTotal - fixedIncome)
 
+  // 残高の見込み。起点の記録より後の日は、日次収支を順に足していった額を出す。
+  // 起点の記録が期間の途中にある場合、それより前の日は遡って引く（記録した日の残高は動かさない）
+  const startBalance = latestBalanceOn(plan, dates[dates.length - 1])
+  const balance: Record<string, number> = {}
+  let lowestDate: string | null = null
+  if (startBalance) {
+    let running = startBalance.amount
+    for (const date of dates) {
+      // 残高を確認した日より後だけ予定を反映する（確認済みの実額を予定で上書きしない）
+      if (date > startBalance.date) running += dailyNet[date]
+      balance[date] = running
+      if (lowestDate === null || running < balance[lowestDate]) lowestDate = date
+    }
+  }
+
   return {
     dates, columns, rows,
     incomeTotal, expenseTotal, net: incomeTotal - expenseTotal,
     dailyNet, cumulative,
     breakevenPerDay: Math.ceil(breakeven / openDays),
+    startBalance, balance, lowestDate,
   }
 }
 
