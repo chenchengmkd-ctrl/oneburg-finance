@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react'
 const fmtNum = (n: number) => n.toLocaleString('ja-JP')
 
 // カンマ区切りで表示する数値入力（内部値はnumber、表示はライブでフォーマット）
-export default function NumberInput({ value, onChange, className, placeholder = '0' }: {
+export default function NumberInput({ value, onChange, className, placeholder = '0', autoFocus, onKeyDown }: {
   value: number; onChange: (v: number) => void; className?: string; placeholder?: string
+  autoFocus?: boolean; onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
 }) {
   const [text, setText] = useState(value ? fmtNum(value) : '')
 
@@ -26,8 +27,11 @@ export default function NumberInput({ value, onChange, className, placeholder = 
       inputMode="numeric"
       value={text}
       onChange={handleChange}
+      onFocus={e => e.target.select()}
+      onKeyDown={onKeyDown}
       placeholder={placeholder}
       className={className}
+      autoFocus={autoFocus}
     />
   )
 }

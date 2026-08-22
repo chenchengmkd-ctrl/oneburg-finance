@@ -3,7 +3,7 @@ import { useAppStore } from '../../stores/appStore'
 import { fmt, fmtShort, todayStr, WD_JP } from '../../utils/calculations'
 import {
   buildCfGrid, nextMonday, mondayOf, weekDates, monthDates, shiftMonth,
-  newCfEntry, ENTRY_ROWS, ROW_LABEL,
+  newCfEntry, ENTRY_ROWS, ROW_LABEL, INCOME_ROWS,
 } from '../../utils/cashflowCalc'
 import type { CfEntry, CfRowKind } from '../../types'
 import NumberInput from '../common/NumberInput'
@@ -15,7 +15,7 @@ type Mode = 'week' | 'month'
 interface Focus { date: string; kind: CfRowKind }
 
 export default function CashflowCalendar() {
-  const { cashflowRecords, loadCashflowRecords, cfPlan, loadCfPlan, saveCfPlan } = useAppStore()
+  const { cashflowRecords, loadCashflowRecords, cfPlan, loadCfPlan, saveCfPlan, reports, loadReports, setSelectedDate, setPage } = useAppStore()
 
   const today = todayStr()
   const [mode, setMode] = useState<Mode>('week')
@@ -25,15 +25,15 @@ export default function CashflowCalendar() {
   const [balanceDate, setBalanceDate] = useState(today)
   const [balanceDraft, setBalanceDraft] = useState(0)
 
-  useEffect(() => { loadCashflowRecords(); loadCfPlan() }, [])
+  useEffect(() => { loadCashflowRecords(); loadCfPlan(); loadReports() }, [])
 
   const dates = useMemo(
     () => (mode === 'week' ? weekDates(weekStart) : monthDates(month)),
     [mode, weekStart, month],
   )
   const grid = useMemo(
-    () => buildCfGrid(dates, cashflowRecords, cfPlan),
-    [dates, cashflowRecords, cfPlan],
+    () => buildCfGrid(dates, cashflowRecords, cfPlan, reports, today),
+    [dates, cashflowRecords, cfPlan, reports, today],
   )
 
   // 連続で触っても取りこぼさないよう、保存直前に最新のcfPlanを読み直して差分を当てる
@@ -87,6 +87,7 @@ export default function CashflowCalendar() {
   const positive = grid.net >= 0
   const focusCell = focus ? grid.rows.find(r => r.kind === focus.kind)?.cells[focus.date] : null
   const isProjectedFocus = focus?.kind === 'cashSales' || focus?.kind === 'deposit'
+  const focusIsIncome = focus ? INCOME_ROWS.includes(focus.kind) : false
 
   return (
     <>
@@ -118,8 +119,9 @@ export default function CashflowCalendar() {
         </div>
       </div>
       <p className="text-[11px] text-gray-400 mt-1 mb-2">
-        金額は税込。現金売上とSquare入金は<strong className="text-gray-500">曜日ごとの実績平均</strong>から見込みを立てています
-        （マスを押せば手修正できます）。それ以外は各マスを押して入力してください
+        金額は税込。マスを押すとそのまま数字を打ち込めます。現金売上とSquare入金は<strong className="text-gray-500">曜日ごとの実績平均</strong>から見込みを立て（仮の値は「仮」）、
+        その日が過ぎて実績（Squareの実績・日次入力の記録）が出ると自動で<strong className="text-green-600">実績「実」</strong>に切り替わります。
+        予定とのズレは「予定比」に出ます
       </p>
 
       {/* サマリー */}
@@ -170,16 +172,48 @@ export default function CashflowCalendar() {
                 {grid.columns.map(c => {
                   const cell = row.cells[c.date]
                   const selected = focus?.date === c.date && focus?.kind === row.kind
+                  const isProjectedRow = row.kind === 'cashSales' || row.kind === 'deposit'
+                  // 実績が出ている日は数字の出どころが実データなので、マス直接では編集させない
+                  // （食品／備品／その他で複数明細が既に入っている日も、内訳が曖昧になるので下の欄で編集する）
+                  const inlineEditable = !cell.isActual && (isProjectedRow || cell.entries.length <= 1)
+                  const diffFavorable = cell.diff !== null && (row.isIncome ? cell.diff > 0 : cell.diff < 0)
+
+                  const commit = (v: number) => {
+                    if (isProjectedRow) setOverride(c.date, row.kind as 'cashSales' | 'deposit', v)
+                    else patchEntries(c.date, row.kind, cur => {
+                      if (cur.length === 1) return v === 0 ? [] : [{ ...cur[0], amount: v }]
+                      return v === 0 ? [] : [{ ...newCfEntry(), amount: v }]
+                    })
+                  }
+
                   return (
                     <td key={c.date}
                       className={`p-0 ${!row.isIncome && grid.rows[i - 1]?.isIncome ? 'border-t-2 border-gray-200' : ''}`}>
-                      <button onClick={() => setFocus(selected ? null : { date: c.date, kind: row.kind })}
-                        className={`w-full text-right px-2 py-1.5 text-xs transition ${
-                          selected ? 'bg-blue-100 ring-1 ring-blue-400' : 'hover:bg-gray-50'} ${
-                          cell.amount === 0 ? 'text-gray-300' : row.isIncome ? 'text-blue-700 font-bold' : 'text-orange-700 font-bold'}`}>
-                        {cell.amount === 0 ? '·' : fmtShort(cell.amount)}
-                        {cell.isOverridden && <span className="text-[9px] text-purple-500 ml-0.5">修</span>}
-                      </button>
+                      {selected && inlineEditable ? (
+                        <NumberInput value={cell.amount} onChange={commit} autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') e.currentTarget.blur()
+                            if (e.key === 'Escape') { e.currentTarget.blur(); setFocus(null) }
+                          }}
+                          className="w-full text-right px-2 py-1.5 text-xs font-bold bg-blue-100 ring-1 ring-blue-400 focus:outline-none"/>
+                      ) : (
+                        <button onClick={() => setFocus(selected ? null : { date: c.date, kind: row.kind })}
+                          className={`w-full text-right px-2 py-1.5 text-xs transition ${
+                            selected ? 'bg-blue-100 ring-1 ring-blue-400' : 'hover:bg-gray-50'} ${
+                            cell.amount === 0 ? 'text-gray-300' : row.isIncome ? 'text-blue-700 font-bold' : 'text-orange-700 font-bold'}`}>
+                          <span>
+                            {cell.amount === 0 ? '·' : fmtShort(cell.amount)}
+                            {cell.isActual && <span className="text-[9px] text-green-600 ml-0.5">実</span>}
+                            {cell.isOverridden && !cell.isActual && <span className="text-[9px] text-purple-500 ml-0.5">仮</span>}
+                            {!cell.isActual && cell.entries.length > 1 && <span className="text-[9px] text-gray-400 ml-0.5">({cell.entries.length})</span>}
+                          </span>
+                          {cell.diff !== null && cell.diff !== 0 && (
+                            <span className={`block text-[9px] font-normal ${diffFavorable ? 'text-green-600' : 'text-red-500'}`}>
+                              予定比{cell.diff > 0 ? '+' : ''}{fmtShort(cell.diff)}
+                            </span>
+                          )}
+                        </button>
+                      )}
                     </td>
                   )
                 })}
@@ -312,29 +346,54 @@ export default function CashflowCalendar() {
             <button onClick={() => setFocus(null)} className="text-gray-300 hover:text-gray-600"><X size={16}/></button>
           </div>
 
-          {isProjectedFocus ? (
-            <>
-              <div className="flex items-center gap-2">
-                <NumberInput value={focusCell.amount}
-                  onChange={v => setOverride(focus.date, focus.kind as 'cashSales' | 'deposit', v)}
-                  className="w-40 text-right text-lg font-bold border-2 border-gray-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"/>
-                {focusCell.isOverridden && (
-                  <button onClick={() => setOverride(focus.date, focus.kind as 'cashSales' | 'deposit', null)}
-                    className="flex items-center gap-1 text-xs text-gray-500 border border-gray-200 rounded px-2 py-1.5 hover:bg-gray-50">
-                    <RotateCcw size={12}/> 見込みに戻す
-                  </button>
+          {focusCell.isActual && (
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3 pb-3 border-b border-gray-100">
+              <div>
+                <div className="text-[10px] text-gray-400">実績</div>
+                <div className="text-2xl font-black text-green-700">{fmt(focusCell.actual!)}</div>
+              </div>
+              <div className="text-xs text-gray-500">
+                予定 {fmt(focusCell.forecast)}
+                {focusCell.diff !== 0 && (
+                  <span className={`ml-1 font-bold ${
+                    (focusIsIncome ? focusCell.diff! > 0 : focusCell.diff! < 0) ? 'text-green-600' : 'text-red-500'}`}>
+                    （差 {focusCell.diff! > 0 ? '+' : ''}{fmt(focusCell.diff!)}）
+                  </span>
                 )}
               </div>
-              <p className="text-[11px] text-gray-400 mt-2">
-                {focusCell.isOverridden
-                  ? '手修正した値を使っています'
-                  : focusCell.isActual
-                    ? 'Squareの実績です。書き換えると手修正になります'
-                    : '曜日ごとの実績平均からの見込みです。書き換えると手修正になります'}
-              </p>
-            </>
+              {!isProjectedFocus && (
+                <button onClick={() => { setSelectedDate(focus.date); setPage('daily') }}
+                  className="ml-auto text-xs text-blue-600 border border-blue-200 rounded px-2 py-1 hover:bg-blue-50">
+                  日次入力で確認・修正 →
+                </button>
+              )}
+            </div>
+          )}
+
+          {isProjectedFocus ? (
+            !focusCell.isActual && (
+              <>
+                <div className="flex items-center gap-2">
+                  <NumberInput value={focusCell.amount}
+                    onChange={v => setOverride(focus.date, focus.kind as 'cashSales' | 'deposit', v)}
+                    className="w-40 text-right text-lg font-bold border-2 border-gray-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  {focusCell.isOverridden && (
+                    <button onClick={() => setOverride(focus.date, focus.kind as 'cashSales' | 'deposit', null)}
+                      className="flex items-center gap-1 text-xs text-gray-500 border border-gray-200 rounded px-2 py-1.5 hover:bg-gray-50">
+                      <RotateCcw size={12}/> 見込みに戻す
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2">
+                  {focusCell.isOverridden
+                    ? '仮に入れた値です。実績が取り込まれると自動でそちらに切り替わります'
+                    : '曜日ごとの実績平均からの見込みです。書き換えると仮の値になります'}
+                </p>
+              </>
+            )
           ) : (
             <>
+              {focusCell.isActual && <div className="text-[11px] text-gray-400 mb-1">予定（内訳）</div>}
               <div className="space-y-1.5">
                 {focusCell.entries.map(e => (
                   <div key={e.id} className="flex items-center gap-2">

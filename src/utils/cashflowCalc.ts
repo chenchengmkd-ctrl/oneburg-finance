@@ -1,4 +1,4 @@
-import type { CashflowRecord, CfPlan, CfEntry, CfRowKind, BalanceSnapshot } from '../types'
+import type { CashflowRecord, CfPlan, CfEntry, CfRowKind, BalanceSnapshot, BalanceReport } from '../types'
 import { WD_JP } from './calculations'
 
 // 週次・月次のキャッシュフロー予想。損益ではなく「いつ・いくら現金が動くか」を見るためのものなので、
@@ -131,11 +131,46 @@ const depositFor = (
   return total
 }
 
+/** 精算期間（木〜翌水）が全日ぶん実績で埋まっているか＝この金曜の入金額はもう確定か */
+const depositWindowFinished = (fridayIso: string, records: Record<string, CashflowRecord>): boolean => {
+  const friday = new Date(fridayIso)
+  for (let i = 8; i >= 2; i--) {
+    if (!records[iso(addDays(friday, -i))]) return false
+  }
+  return true
+}
+
+/** 実績を混ぜず曜日平均だけで見積もった入金額。「当初の予想」として実績と比較するための値 */
+const depositForecastOnly = (fridayIso: string, avgs: WeekdayAverage[]): number => {
+  const friday = new Date(fridayIso)
+  let total = 0
+  for (let i = 8; i >= 2; i--) total += avgs[addDays(friday, -i).getDay()].noncash
+  return total
+}
+
+/** 日次入力（残高報告）から、その日そのカテゴリの実績額を拾う。食品・備品以外の引出は全部「その他」に集約 */
+const actualEntryAmount = (kind: 'personal' | 'ingredient' | 'supplies' | 'other', report: BalanceReport): number => {
+  if (kind === 'personal') return report.pers.deposits.reduce((s, i) => s + i.amount, 0)
+  let total = 0
+  for (const bucket of [report.corp, report.pers, report.cash]) {
+    for (const item of bucket.withdraws) {
+      const cat = item.category ?? 'other'
+      if (kind === 'ingredient' && cat === 'ingredient') total += item.amount
+      else if (kind === 'supplies' && cat === 'supplies') total += item.amount
+      else if (kind === 'other' && cat !== 'ingredient' && cat !== 'supplies') total += item.amount
+    }
+  }
+  return total
+}
+
 export interface CfCell {
-  amount: number
-  entries: CfEntry[]     // 手入力の明細（見込み行は空）
-  isOverridden: boolean  // 見込みを手修正しているか
-  isActual: boolean      // 実績（過去日）か
+  amount: number          // 表示用の実効値（実績があれば実績、無ければ予定・見込み）
+  forecast: number        // 予定・見込み（手入力の予定 or 曜日平均からの見込み）
+  actual: number | null   // 実績（実際にあった額）。まだ無い日はnull
+  diff: number | null     // 実績−予定。実績が無い日はnull
+  entries: CfEntry[]      // 手入力の明細（見込み行は空。あくまで「予定」側の内訳）
+  isOverridden: boolean   // 見込みを手修正しているか（cashSales・depositのみ）
+  isActual: boolean       // このマスがいま実績を表示しているか
 }
 
 export interface CfRow {
@@ -168,6 +203,8 @@ export const buildCfGrid = (
   dates: string[],
   cashflowRecords: Record<string, CashflowRecord>,
   plan: CfPlan,
+  reports: Record<string, BalanceReport>,
+  todayIso: string,
 ): CfGrid => {
   const avgs = weekdayAverages(Object.values(cashflowRecords))
 
@@ -187,24 +224,39 @@ export const buildCfGrid = (
     for (const date of dates) {
       const d = new Date(date)
       const override = plan.overrides[date]?.[kind as 'cashSales' | 'deposit']
-      const actual = cashflowRecords[date]
+      const cfRecord = cashflowRecords[date]
+      const report = reports[date]
+      const elapsed = date <= todayIso
       let amount = 0
+      let forecast = 0
+      let actual: number | null = null
       let isActual = false
       let entries: CfEntry[] = []
 
       if (kind === 'cashSales') {
-        if (override !== undefined) amount = override
-        else if (actual) { amount = actual.cash; isActual = true }
-        else amount = avgs[d.getDay()].cash
+        forecast = override !== undefined ? override : avgs[d.getDay()].cash
+        // 実績が取り込まれていれば、仮で入れた見込み（override）より実績を優先する＝日が経てば自動で切り替わる
+        if (elapsed && cfRecord) { actual = cfRecord.cash; isActual = true; amount = actual }
+        else amount = forecast
       } else if (kind === 'deposit') {
-        if (override !== undefined) amount = override
-        else amount = d.getDay() === 5 ? depositFor(date, cashflowRecords, avgs) : 0
+        const isFriday = d.getDay() === 5
+        if (!isFriday) {
+          amount = override !== undefined ? override : 0
+        } else {
+          forecast = override !== undefined ? override : depositForecastOnly(date, avgs)
+          const finished = elapsed && depositWindowFinished(date, cashflowRecords)
+          if (finished) { actual = depositFor(date, cashflowRecords, avgs); isActual = true; amount = actual }
+          else amount = override !== undefined ? override : depositFor(date, cashflowRecords, avgs)
+        }
       } else {
         entries = plan.entries[date]?.[kind] ?? []
-        amount = entries.reduce((s, e) => s + e.amount, 0)
+        forecast = entries.reduce((s, e) => s + e.amount, 0)
+        if (elapsed && report) { actual = actualEntryAmount(kind, report); isActual = true; amount = actual }
+        else amount = forecast
       }
 
-      cells[date] = { amount, entries, isOverridden: override !== undefined, isActual }
+      const diff = actual !== null ? actual - forecast : null
+      cells[date] = { amount, forecast, actual, diff, entries, isOverridden: override !== undefined, isActual }
       total += amount
     }
     return { kind, label: ROW_LABEL[kind], isIncome, isProjected, cells, total }
