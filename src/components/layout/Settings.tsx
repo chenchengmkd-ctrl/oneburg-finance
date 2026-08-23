@@ -214,9 +214,8 @@ function ItemListEditor({ defaultRate, values, onChange }: {
 }
 
 export default function Settings() {
-  const { settings, staff, itemLabels, budget, loadSettings, saveSettings, loadStaff, saveStaff, deleteStaff, loadItemLabels, saveItemLabels, loadBudget, saveBudget } = useAppStore()
+  const { settings, staff, itemLabels, budget, loadSettings, saveSettings, loadStaff, loadItemLabels, saveItemLabels, loadBudget, saveBudget } = useAppStore()
   const [budgetScope, setBudgetScope] = useState<'default' | 'month'>('default')
-  const [newName, setNewName] = useState('')
   const [migrating, setMigrating] = useState(false)
   const [migrateResult, setMigrateResult] = useState<string | null>(null)
   const localKeys = Object.keys(localStorage).filter(k => k.startsWith(LOCAL_PREFIX))
@@ -279,12 +278,6 @@ export default function Settings() {
     setMigrateResult(`${count}件のデータをクラウドに移行しました。反映されたか確認したら、このブラウザのデータは消して構いません。`)
   }
 
-  const addStaff = () => {
-    if (!newName) return
-    saveStaff({ id: `staff_${Date.now()}`, name: newName, hourlyWage: 1500, transport: 0 })
-    setNewName('')
-  }
-
   return (
     <div className="p-4 sm:p-6 max-w-xl">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">設定</h1>
@@ -327,35 +320,20 @@ export default function Settings() {
         <div className="text-sm font-bold text-gray-600 mb-4">スタッフ台帳</div>
         <div className="space-y-2">
           {staff.map(m => (
-            <div key={m.id} className="flex items-center gap-2">
-              <input type="text" value={m.name} onChange={e => saveStaff({ ...m, name: e.target.value })}
-                className="flex-1 text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-gray-400">時給</span>
-                <NumberInput value={m.hourlyWage} onChange={v => saveStaff({ ...m, hourlyWage: v })}
-                  className="w-20 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-gray-400">交通費</span>
-                <NumberInput value={m.transport} onChange={v => saveStaff({ ...m, transport: v })}
-                  className="w-20 text-right text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
-              </div>
-              <button onClick={() => deleteStaff(m.id)} className="text-gray-300 hover:text-red-500 shrink-0">
-                <Trash2 size={14}/>
-              </button>
+            <div key={m.id} className="flex items-center gap-2 text-sm">
+              <span className="flex-1 text-gray-700">{m.name}</span>
+              <span className="text-[10px] text-gray-400">時給</span>
+              <span className="w-20 text-right text-gray-600">{m.hourlyWage.toLocaleString()}</span>
+              <span className="text-[10px] text-gray-400">交通費</span>
+              <span className="w-20 text-right text-gray-600">{m.transport.toLocaleString()}</span>
             </div>
           ))}
           {staff.length === 0 && <div className="text-xs text-gray-300">登録なし</div>}
         </div>
-        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-          <input type="text" placeholder="新しいスタッフ名" value={newName} onChange={e => setNewName(e.target.value)}
-            className="flex-1 border border-dashed border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"/>
-          <button onClick={addStaff} disabled={!newName}
-            className="flex items-center gap-1 text-xs bg-gray-700 text-white px-3 py-1.5 rounded font-bold hover:bg-gray-800 transition disabled:opacity-30">
-            <Plus size={14}/> 追加
-          </button>
-        </div>
-        <p className="text-xs text-gray-400 mt-2">「日次入力」の出勤スタッフ欄で選べる名前・時給・交通費の一覧です</p>
+        <p className="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">
+          「日次入力」の出勤スタッフ欄で選べる名前・時給・交通費の一覧です（表示のみ）。<br/>
+          追加・編集・削除は<strong className="text-gray-500">勤怠管理アプリ（スタッフ管理タブ）</strong>で行ってください。
+        </p>
       </div>
 
       <div className="card mb-4">

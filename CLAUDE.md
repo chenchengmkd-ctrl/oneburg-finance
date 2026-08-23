@@ -125,7 +125,7 @@ src/
 - 既知の制約：借入返済・立替返却（例：薙刀への返却）を残高報告の引出明細として記録すると「その他経費」に混ざり、損益を実態より低く見せる。返済用の明細には注意書きするか、必要なら`ExpenseCategory`に'repayment'等を追加して除外する拡張の余地あり（未実装）
 
 ## スタッフ台帳・出勤シフト・人件費
-`birdmen:staff`（`Staff[]`、`{id, name, hourlyWage, transport}`）にスタッフ名簿を保持する。初期値は`storage.defaultStaff()`（都丸里帆・工藤香菜・上原敦子、全員時給1500円、交通費は都丸960円/上原356円/工藤0円）。「設定」画面の「スタッフ台帳」セクションで名前・時給・交通費を編集、追加、削除できる。
+`birdmen:staff`（`Staff[]`、`{id, name, hourlyWage, transport}`）にスタッフ名簿を保持する。初期値は`storage.defaultStaff()`（都丸里帆・工藤香菜・上原敦子、全員時給1500円、交通費は都丸960円/上原356円/工藤0円）。**2026-08-23より、名前・時給・交通費の追加・編集・削除は勤怠管理アプリ(`line-kintai-vercel/web`)の「スタッフ管理」タブで行う**（人件費の元データを勤怠アプリ側に一本化し、二重管理を避けるための設計変更）。このアプリの「設定」画面の「スタッフ台帳」は**表示のみ**（`Settings.tsx`）。
 
 `BalanceReport.shifts: ShiftEntry[]`に「誰が・何時から何時まで働いたか」を保持する（`{id, staffName, clockIn, clockOut, hourlyWage, transport}`）。労働時間は`storage.calcShiftHours(clockIn, clockOut)`で出退勤時刻から自動計算（1分単位、丸めなし）。日給は`hours × hourlyWage + transport`を1円未満四捨五入（`shiftPay`。保存はせず都度計算）。表示用の「◯時間◯分」変換は`utils/calculations.ts`の`fmtHours`に共通化（`DailyEntry.tsx`・`ShiftBulkImportModal.tsx`の両方で使用）。
 - 入力は「日次入力」画面のみ（`DailyEntry.tsx`）。スタッフは台帳からの`<select>`で選ぶと時給・交通費が自動入力される
