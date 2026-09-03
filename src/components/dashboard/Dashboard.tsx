@@ -1,10 +1,14 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import { fmt, fmtShort } from '../../utils/calculations'
 import { buildReportSeries, projectReal, tomorrowStr } from '../../utils/reportCalc'
 import { upcomingPayments, netCashflow } from '../../utils/paymentCalc'
 import { calcBudget, isOverPace, isBehindPace } from '../../utils/budgetCalc'
-import { Building2, User, Wallet, Coins, TrendingUp, TrendingDown, CalendarClock, Landmark } from 'lucide-react'
+import { buildCfGrid, latestBalanceOn, dateRange } from '../../utils/cashflowCalc'
+import {
+  Building2, User, Wallet, Coins, TrendingUp, TrendingDown, CalendarClock, Landmark,
+  ChevronDown, ChevronUp,
+} from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const AmountCard = ({ label, amount, sub, color, icon: Icon }: {
@@ -51,9 +55,14 @@ function BudgetBar({ label, actual, plan, rate, paceRate, color, behindIsBad }: 
 }
 
 export default function Dashboard() {
-  const { settings, reports, loans, payments, budget, loadSettings, loadReports, loadLoans, loadPayments, loadBudget, setPage } = useAppStore()
+  const {
+    settings, reports, loans, payments, budget, cfPlan, cashflowRecords,
+    loadSettings, loadReports, loadLoans, loadPayments, loadBudget, loadCfPlan, loadCashflowRecords,
+    setPage,
+  } = useAppStore()
   const today = new Date()
   const month = settings.targetMonth || `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+  const [showAccounts, setShowAccounts] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -61,6 +70,8 @@ export default function Dashboard() {
     loadLoans()
     loadPayments()
     loadBudget()
+    loadCfPlan()
+    loadCashflowRecords()
   }, [])
 
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
@@ -78,6 +89,20 @@ export default function Dashboard() {
     残高合計: s.totalBal,
     実質総資産: s.realBal,
   }))
+
+  // 手元資金の目安：資金繰りカレンダーと同じ「実際に記録した残高＋その後の日々の収支」で計算する
+  // （日次入力の積み上げ計算＝0円起点で、prevOverrideの入力がほぼ無い実データでは実際の口座残高とズレるため、
+  //  ダッシュボードの一番目立つ数字はこちらを正とする）
+  const startBalance = useMemo(() => latestBalanceOn(cfPlan, todayStr), [cfPlan, todayStr])
+  const balanceDates = useMemo(
+    () => (startBalance ? dateRange(startBalance.date, todayStr) : []),
+    [startBalance, todayStr],
+  )
+  const balanceGrid = useMemo(
+    () => (balanceDates.length > 0 ? buildCfGrid(balanceDates, cashflowRecords, cfPlan, reports, todayStr) : null),
+    [balanceDates, cashflowRecords, cfPlan, reports, todayStr],
+  )
+  const cashOnHand = balanceGrid && startBalance ? balanceGrid.balance[todayStr] : null
 
   // 今後7日の資金繰り
   const upcoming7 = useMemo(() => upcomingPayments(payments, todayStr, 7), [payments, todayStr])
@@ -105,15 +130,66 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
-          {/* 資金状況 */}
-          <p className="section-header">資金状況（残高報告 {latest.date.slice(5).replace('-', '/')} 時点）</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-            <AmountCard label="GMO個人" amount={latest.persBal} sub="残高目安" color="border-green-500" icon={User} />
-            <AmountCard label="GMO法人" amount={latest.corpBal} sub="残高目安" color="border-blue-500" icon={Building2} />
-            <AmountCard label="現金（レジ金除く）" amount={latest.cashBal} sub="残高目安" color="border-amber-500" icon={Coins} />
-            <AmountCard label="実質総資産" amount={latest.realBal}
-              sub={`残高計 ${fmtShort(latest.totalBal)} ＋入金予定 −返却予定`} color="border-amber-500" icon={Wallet} />
-          </div>
+          {/* 手元資金の目安（資金繰りカレンダーで記録した実額ベース） */}
+          {startBalance && cashOnHand !== null ? (
+            <div className={`card border-l-4 mb-2 ${cashOnHand < 0 ? 'border-red-500' : 'border-teal-500'}`}>
+              <div className="card-header flex items-center gap-1"><Wallet size={12}/> 手元資金の目安</div>
+              <div className={`text-3xl font-black ${cashOnHand < 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmt(cashOnHand)}</div>
+              <div className="text-xs text-gray-400 mt-1">
+                {startBalance.date.slice(5).replace('-', '/')}に記録した実額（{fmt(startBalance.amount)}）から、
+                その後の日々の収支を足し引きした概算です
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setPage('payments')}
+              className="card w-full text-left border-l-4 border-gray-300 mb-2 hover:bg-gray-50 transition">
+              <div className="card-header flex items-center gap-1"><Wallet size={12}/> 手元資金の目安</div>
+              <div className="text-sm text-gray-500">
+                まだ残高が記録されていません。資金繰りタブで通帳やアプリで見た実額を記録すると、ここに出ます →
+              </div>
+            </button>
+          )}
+
+          {/* 口座別の内訳（参考値・折りたたみ） */}
+          <button onClick={() => setShowAccounts(v => !v)}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 mb-4">
+            {showAccounts ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+            口座別の内訳（参考値）
+          </button>
+          {showAccounts && (
+            <>
+              <p className="text-[11px] text-gray-400 -mt-3 mb-2">
+                入出金の記録から積み上げて計算した参考値です。実際の口座残高とは誤差が生じることがあります
+                （上の「手元資金の目安」が実額ベースの数字です）
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                <AmountCard label="GMO個人" amount={latest.persBal} sub="残高目安" color="border-green-500" icon={User} />
+                <AmountCard label="GMO法人" amount={latest.corpBal} sub="残高目安" color="border-blue-500" icon={Building2} />
+                <AmountCard label="現金（レジ金除く）" amount={latest.cashBal} sub="残高目安" color="border-amber-500" icon={Coins} />
+                <AmountCard label="実質総資産" amount={latest.realBal}
+                  sub={`残高計 ${fmtShort(latest.totalBal)} ＋入金予定 −返却予定`} color="border-amber-500" icon={Wallet} />
+              </div>
+              <div className="card mb-4">
+                <div className="card-header">資産推移（今月・参考値）</div>
+                {chartData.length >= 2 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                      <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickLine={false} axisLine={false}
+                        tickFormatter={(v: number) => `${Math.round(v / 10000)}万`} width={40} />
+                      <Tooltip formatter={(v) => fmt(Number(v))} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Line type="monotone" dataKey="残高合計" stroke="#0277BD" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="実質総資産" stroke="#F57F17" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-sm text-gray-400 py-6 text-center">報告が2日分たまるとグラフと着地予想が表示されます</div>
+                )}
+              </div>
+            </>
+          )}
 
           {/* 今月の収支・明日の予想・支払い予定 */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -168,27 +244,6 @@ export default function Dashboard() {
               )}
             </button>
           )}
-
-          {/* 資産推移チャート */}
-          <div className="card mb-4">
-            <div className="card-header">資産推移（今月）</div>
-            {chartData.length >= 2 ? (
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickLine={false} axisLine={false}
-                    tickFormatter={(v: number) => `${Math.round(v / 10000)}万`} width={40} />
-                  <Tooltip formatter={(v) => fmt(Number(v))} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="残高合計" stroke="#0277BD" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                  <Line type="monotone" dataKey="実質総資産" stroke="#F57F17" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="text-sm text-gray-400 py-6 text-center">報告が2日分たまるとグラフと着地予想が表示されます</div>
-            )}
-          </div>
 
           {/* 借入・立替金 */}
           <button onClick={() => setPage('payments')} className="card w-full text-left border-l-4 border-purple-500 mb-4 hover:bg-gray-50 transition">

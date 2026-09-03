@@ -386,6 +386,9 @@ export default function DailyEntry() {
 
       <div className="card mb-6">
         <SalesInput gross={sales} rate={salesRate} onChangeAmount={updateSales} onChangeRate={updateSalesRate}/>
+        <p className="text-[11px] text-gray-400 mt-2">
+          Squareのレジ売上から自動で反映されます。手入力は不要です（間違っていたらここで直せます）
+        </p>
       </div>
 
       {/* 出勤スタッフ・人件費 */}
@@ -402,6 +405,9 @@ export default function DailyEntry() {
             <span className="text-lg font-black text-purple-700">{fmt(labor)}</span>
           </div>
         </div>
+        <p className="text-[11px] text-gray-400 mb-2">
+          LINEの勤怠ボット（スタッフが「出勤」「退勤」と送るだけ）から自動で反映されます。手入力は不要です（間違っていたらここで直せます）
+        </p>
         <div className="space-y-2">
           {shifts.map(s => {
             const hours = calcShiftHours(s.clockIn, s.clockOut)

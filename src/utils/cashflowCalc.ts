@@ -82,6 +82,15 @@ export const monthDates = (month: string): string[] => {
   return Array.from({ length: days }, (_, i) => `${y}-${pad2(m)}-${pad2(i + 1)}`)
 }
 
+/** startIso〜endIso（両端含む）の連続した日付配列。endIsoがstartIsoより前なら空配列 */
+export const dateRange = (startIso: string, endIso: string): string[] => {
+  const start = new Date(startIso)
+  const end = new Date(endIso)
+  const days = Math.round((end.getTime() - start.getTime()) / 86400000)
+  if (days < 0) return []
+  return Array.from({ length: days + 1 }, (_, i) => iso(addDays(start, i)))
+}
+
 export const shiftMonth = (month: string, delta: number): string => {
   const [y, m] = month.split('-').map(Number)
   const d = new Date(y, m - 1 + delta, 1)
