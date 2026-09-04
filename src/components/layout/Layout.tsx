@@ -1,15 +1,15 @@
 import { useAppStore } from '../../stores/appStore'
-import { LayoutDashboard, NotebookPen, Landmark, BarChart3, LineChart, Settings } from 'lucide-react'
+import { Home, NotebookPen, CalendarRange, BarChart3, Settings } from 'lucide-react'
 
-// 残高報告タブは廃止（2026-08-06）。日次入力に一本化した。
-// データ構造（BalanceReport）はそのまま使い続けているので、過去の入力も損益表・ダッシュボードに反映される。
+// 画面は「いつ何をするか」で分けている（2026-09の刷新）
+// ホーム＝随時／入力＝毎日／資金繰り＝週1／ふりかえり＝月1
+// ページIDの `daily` は、LINE通知のリンク（?page=daily&date=...）と合わせるため変えないこと
 const NAV = [
-  { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
-  { id: 'daily',     label: '日次入力',       icon: NotebookPen },
-  { id: 'pl',        label: '損益表',         icon: BarChart3 },
-  { id: 'analytics', label: '分析',           icon: LineChart },
-  { id: 'payments',  label: '資金繰り',       icon: Landmark },
-  { id: 'settings',  label: '設定',           icon: Settings },
+  { id: 'home',     label: 'ホーム',     icon: Home },
+  { id: 'daily',    label: '入力',       icon: NotebookPen },
+  { id: 'cashflow', label: '資金繰り',   icon: CalendarRange },
+  { id: 'review',   label: 'ふりかえり', icon: BarChart3 },
+  { id: 'settings', label: '設定',       icon: Settings },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {

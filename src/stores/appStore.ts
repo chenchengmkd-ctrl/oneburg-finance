@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import type { Settings, Loan, BalanceReport, ScheduledPayment, Staff, ItemLabelSet, BudgetSet, ShiftPattern, SalesDetail, CashflowRecord, CfPlan } from '../types'
+import type { Settings, BalanceReport, Staff, ItemLabelSet, BudgetSet, SalesDetail, CashflowRecord, CfPlan } from '../types'
 import { emptyCfPlan, migrateCfPlan } from '../utils/cashflowCalc'
-import { storage, defaultSettings, defaultLoans, defaultPayments, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, defaultShiftPattern, migrateShiftPattern, migrateReport } from '../utils/storage'
+import { storage, defaultSettings, defaultStaff, defaultItemLabelSet, migrateItemLabelSet, defaultBudgetSet, migrateBudgetSet, migrateReport } from '../utils/storage'
 
 interface AppState {
   // 現在のページ
@@ -18,17 +18,6 @@ interface AppState {
   loadReports: () => Promise<void>
   saveReport: (report: BalanceReport) => Promise<void>
 
-  // 借入・立替金
-  loans: Loan[]
-  loadLoans: () => Promise<void>
-  saveLoan: (loan: Loan) => Promise<void>
-
-  // 支払い予定
-  payments: ScheduledPayment[]
-  loadPayments: () => Promise<void>
-  savePayment: (payment: ScheduledPayment) => Promise<void>
-  deletePayment: (id: string) => Promise<void>
-
   // スタッフ台帳
   staff: Staff[]
   loadStaff: () => Promise<void>
@@ -44,11 +33,6 @@ interface AppState {
   budget: BudgetSet
   loadBudget: () => Promise<void>
   saveBudget: (data: BudgetSet) => Promise<void>
-
-  // シフトの曜日パターン
-  shiftPattern: ShiftPattern
-  loadShiftPattern: () => Promise<void>
-  saveShiftPattern: (data: ShiftPattern) => Promise<void>
 
   // Squareのレジ明細（出数・客数）。ボットが書き込み、アプリは読むだけ
   salesDetails: Record<string, SalesDetail>
@@ -74,7 +58,7 @@ const todayStr = () => {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  currentPage: 'dashboard',
+  currentPage: 'home',
   setPage: (page) => set({ currentPage: page }),
 
   selectedDate: todayStr(),
@@ -104,37 +88,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveReport: async (report) => {
     set(state => ({ reports: { ...state.reports, [report.date]: report } }))
     await storage.set(`report:${report.date}`, report)
-  },
-
-  loans: defaultLoans(),
-  loadLoans: async () => {
-    const loans = (await storage.get<Loan[]>('loans')) || defaultLoans()
-    set({ loans })
-  },
-  saveLoan: async (loan) => {
-    const loans = get().loans.map(l => l.id === loan.id ? loan : l)
-    set({ loans })
-    await storage.set('loans', loans)
-  },
-
-  payments: defaultPayments(),
-  loadPayments: async () => {
-    const payments = (await storage.get<ScheduledPayment[]>('payments')) || defaultPayments()
-    set({ payments })
-  },
-  savePayment: async (payment) => {
-    const existing = get().payments
-    const idx = existing.findIndex(p => p.id === payment.id)
-    const payments = idx >= 0
-      ? existing.map(p => p.id === payment.id ? payment : p)
-      : [...existing, payment]
-    set({ payments })
-    await storage.set('payments', payments)
-  },
-  deletePayment: async (id) => {
-    const payments = get().payments.filter(p => p.id !== id)
-    set({ payments })
-    await storage.set('payments', payments)
   },
 
   staff: defaultStaff(),
@@ -173,16 +126,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveBudget: async (data) => {
     set({ budget: data })
     await storage.set('budget', data)
-  },
-
-  shiftPattern: defaultShiftPattern(),
-  loadShiftPattern: async () => {
-    const raw = await storage.get<unknown>('shift-pattern')
-    set({ shiftPattern: raw ? migrateShiftPattern(raw) : defaultShiftPattern() })
-  },
-  saveShiftPattern: async (data) => {
-    set({ shiftPattern: data })
-    await storage.set('shift-pattern', data)
   },
 
   salesDetails: {},

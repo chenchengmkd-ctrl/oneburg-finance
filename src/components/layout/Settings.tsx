@@ -1,16 +1,12 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { storage } from '../../utils/storage'
-import { supabase } from '../../utils/supabaseClient'
 import { EXPENSE_CATEGORY_LABEL, DEFAULT_TAX_RATE } from '../../types'
 import type { ExpenseCategory, LabelDef, TaxRate, MonthBudget } from '../../types'
 import { emptyMonthBudget, budgetFor } from '../../utils/storage'
 import { fmt, WD_JP } from '../../utils/calculations'
 import { weekdayCounts } from '../../utils/budgetCalc'
 import NumberInput from '../common/NumberInput'
-import { Plus, Trash2, UploadCloud } from 'lucide-react'
-
-const LOCAL_PREFIX = 'birdmen:'
+import { Plus, Trash2 } from 'lucide-react'
 
 const ALL_EXPENSE_CATEGORIES = Object.keys(EXPENSE_CATEGORY_LABEL) as ExpenseCategory[]
 
@@ -216,9 +212,6 @@ function ItemListEditor({ defaultRate, values, onChange }: {
 export default function Settings() {
   const { settings, staff, itemLabels, budget, loadSettings, saveSettings, loadStaff, loadItemLabels, saveItemLabels, loadBudget, saveBudget } = useAppStore()
   const [budgetScope, setBudgetScope] = useState<'default' | 'month'>('default')
-  const [migrating, setMigrating] = useState(false)
-  const [migrateResult, setMigrateResult] = useState<string | null>(null)
-  const localKeys = Object.keys(localStorage).filter(k => k.startsWith(LOCAL_PREFIX))
 
   useEffect(() => { loadSettings(); loadStaff(); loadItemLabels(); loadBudget() }, [])
 
@@ -261,23 +254,6 @@ export default function Settings() {
     setBudgetScope('default')
   }
 
-  const migrateFromLocalStorage = async () => {
-    setMigrating(true)
-    setMigrateResult(null)
-    let count = 0
-    for (const key of localKeys) {
-      try {
-        const value = JSON.parse(localStorage.getItem(key)!)
-        await storage.set(key.slice(LOCAL_PREFIX.length), value)
-        count++
-      } catch (e) {
-        console.error('移行失敗:', key, e)
-      }
-    }
-    setMigrating(false)
-    setMigrateResult(`${count}件のデータをクラウドに移行しました。反映されたか確認したら、このブラウザのデータは消して構いません。`)
-  }
-
   return (
     <div className="p-4 sm:p-6 max-w-xl">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">設定</h1>
@@ -286,7 +262,7 @@ export default function Settings() {
         <div className="text-sm font-bold text-gray-600 mb-4">対象月</div>
         <input type="month" value={settings.targetMonth} onChange={e => saveSettings({ targetMonth: e.target.value })}
           className="input-cell w-48"/>
-        <p className="text-xs text-gray-400 mt-2">ダッシュボード・支払い予定の集計対象月です</p>
+        <p className="text-xs text-gray-400 mt-2">ホーム・ふりかえりで集計する月です</p>
       </div>
 
       <div className="card mb-4">
@@ -331,7 +307,7 @@ export default function Settings() {
           {staff.length === 0 && <div className="text-xs text-gray-300">登録なし</div>}
         </div>
         <p className="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">
-          「日次入力」の出勤スタッフ欄で選べる名前・時給・交通費の一覧です（表示のみ）。<br/>
+          「入力」画面の人件費欄で選べる名前・時給・交通費の一覧です（表示のみ）。<br/>
           追加・編集・削除は<strong className="text-gray-500">勤怠管理アプリ（スタッフ管理タブ）</strong>で行ってください。
         </p>
       </div>
@@ -339,7 +315,7 @@ export default function Settings() {
       <div className="card mb-4">
         <div className="text-sm font-bold text-gray-600 mb-1">品目・仕入れ先マスタ</div>
         <p className="text-xs text-gray-400 mb-4">
-          「日次入力」の仕入れ欄でプルダウンに出る選択肢です。品目に設定した消費税率は、その品目を選んだときに自動で入ります。
+          「入力」画面の経費欄でプルダウンに出る選択肢です。品目に設定した消費税率は、その品目を選んだときに自動で入ります。
           ここで削除しても、過去に入力済みのデータは消えません
         </p>
         <div className="space-y-5">
@@ -357,34 +333,17 @@ export default function Settings() {
         </div>
       </div>
 
-      {localKeys.length > 0 && (
-        <div className="mt-8 card border border-blue-100">
-          <div className="text-sm font-bold text-blue-600 mb-2">このブラウザに残っているデータをクラウドに移行</div>
-          <p className="text-xs text-gray-400 mb-3">
-            このブラウザ（端末）にまだ{localKeys.length}件のデータが残っています。クラウド（Supabase）に移行すると、スマホ・PCどちらからでも同じデータが見られるようになります。
-          </p>
-          <button onClick={migrateFromLocalStorage} disabled={migrating}
-            className="flex items-center gap-1.5 text-xs bg-blue-700 text-white px-3 py-1.5 rounded font-bold hover:bg-blue-800 transition disabled:opacity-50">
-            <UploadCloud size={14}/> {migrating ? '移行中…' : 'クラウドに移行する'}
-          </button>
-          {migrateResult && <p className="text-xs text-green-600 mt-2">{migrateResult}</p>}
-        </div>
-      )}
-
-      <div className="mt-8 card border border-red-100">
-        <div className="text-sm font-bold text-red-500 mb-2">データ管理</div>
-        <p className="text-xs text-gray-400 mb-3">データはクラウド（Supabase）に保存されており、スマホ・PCどちらからでも同じデータにアクセスできます。</p>
-        <button
-          onClick={async () => {
-            if (confirm('すべてのデータを削除しますか？この操作は取り消せません。')) {
-              await supabase.from('birdmen_kv').delete().like('key', `${LOCAL_PREFIX}%`)
-              window.location.reload()
-            }
-          }}
-          className="text-xs text-red-400 border border-red-200 rounded px-3 py-1 hover:bg-red-50"
-        >
-          全データをリセット
-        </button>
+      <div className="mt-8 card">
+        <div className="text-sm font-bold text-gray-600 mb-2">データについて</div>
+        <p className="text-xs text-gray-400">
+          データはクラウド（Supabase）に保存され、スマホ・PCどちらからでも同じものが見られます。
+          同じ保存先を<strong className="text-gray-500">LINEボット（売上取込・レシート登録）</strong>と
+          <strong className="text-gray-500">勤怠アプリ（出退勤）</strong>も使っています。
+        </p>
+        <p className="text-xs text-gray-400 mt-2">
+          以前ここにあった「全データをリセット」は廃止しました。財務のデータだけでなく、
+          勤怠アプリのスタッフ紐付けや打刻履歴まで消してしまう作りになっていたためです（2026-09）。
+        </p>
       </div>
     </div>
   )

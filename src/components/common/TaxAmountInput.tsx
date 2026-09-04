@@ -2,9 +2,10 @@ import NumberInput from './NumberInput'
 import { toNet, toGross } from '../../utils/storage'
 import type { TaxRate } from '../../types'
 
-// 税抜・税込のどちらからでも入力できる金額欄。
-// 損益は税抜ベースで見るので税抜を主として上に置くが、レシートに税込しか書いていないことも多いため
-// 税込欄も直接編集できるようにしてある。保存値（LineItem.amount / cash.sales）は常に税込＝実際に動いたお金。
+// 税込・税抜のどちらからでも入力できる金額欄。
+// レシートに書いてあるのは税込なので、**税込を主（上）** にして「見た数字をそのまま打つ」だけで済むようにしてある
+// （2026-09の画面刷新で税抜主から入れ替えた）。損益は従来どおり税抜で計算・表示する。
+// 保存値（LineItem.amount / cash.sales）は常に税込＝実際に動いたお金。
 export default function TaxAmountInput({ gross, rate, onChange, size = 'sm' }: {
   gross: number; rate: TaxRate; onChange: (gross: number) => void; size?: 'sm' | 'lg'
 }) {
@@ -19,7 +20,7 @@ export default function TaxAmountInput({ gross, rate, onChange, size = 'sm' }: {
   if (rate === 0) {
     return (
       <div className="relative">
-        <span className={tag}>税抜</span>
+        <span className={tag}>税込</span>
         <NumberInput value={gross} onChange={onChange} className={box}/>
       </div>
     )
@@ -28,12 +29,12 @@ export default function TaxAmountInput({ gross, rate, onChange, size = 'sm' }: {
   return (
     <div className={big ? 'space-y-2' : 'space-y-1'}>
       <div className="relative">
-        <span className={tag}>税抜</span>
-        <NumberInput value={net} onChange={v => onChange(toGross(v, rate))} className={box}/>
+        <span className={tag}>税込</span>
+        <NumberInput value={gross} onChange={onChange} className={box}/>
       </div>
       <div className="relative">
-        <span className={tag}>税込</span>
-        <NumberInput value={gross} onChange={onChange}
+        <span className={tag}>税抜</span>
+        <NumberInput value={net} onChange={v => onChange(toGross(v, rate))}
           className={`${box} ${big ? 'text-gray-500 !text-lg !py-2' : 'text-gray-500'}`}/>
       </div>
     </div>

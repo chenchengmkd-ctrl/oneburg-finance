@@ -69,39 +69,8 @@ export interface Settings {
   targetMonth: string          // 管理対象月 YYYY-MM
 }
 
-// 借入・立替金（返済対象）
-export interface Loan {
-  id: string
-  lender: string        // 借入・立替先
-  borrowedDate: string  // 借入日（不明なら空文字）
-  totalAmount: number   // 借入・立替総額
-  paidAmount: number    // 返済済み累計（手動更新）
-  priority: 'high' | 'medium' | 'low'
-  note: string
-}
-
-// 資金繰り予定の分類
-// fixed: 毎月同じ日・同じ金額（家賃、サブスク、バイト給与など）
-// variable: 毎月ほぼ同じ日・金額は変動（光熱費、社員給与、仕入、現金売上見込みなど）
-// adhoc: 不定期・都度発生（借入返済、臨時の立替返却、単発の入金見込みなど）
-export type PaymentCategory = 'fixed' | 'variable' | 'adhoc'
-
-// in: 収入予定（バイト入金、現金売上見込みなど）/ out: 支出予定（家賃、仕入など）
-export type PaymentDirection = 'in' | 'out'
-
-export interface ScheduledPayment {
-  id: string
-  name: string
-  category: PaymentCategory
-  direction: PaymentDirection
-  amount: number                    // fixed=確定額 / variable・adhoc=見込み額
-  bucket: 'corp' | 'pers' | 'cash'  // どの残高が動くか
-  dayOfMonth: number | null         // fixed・variable: 毎月の予定日（1-31）
-  dueDate: string | null            // adhoc: 具体的な予定日 YYYY-MM-DD（未定ならnull）
-  linkedLoanId: string | null       // adhoc: 借入返済に紐づく場合、対象のLoan.id
-  note: string
-  active: boolean                   // falseで一覧から非表示（削除せず保持）
-}
+// 借入（Loan）と資金繰り予定（ScheduledPayment）の型は2026-09の画面刷新で廃止した。
+// どちらも実データが一度も保存されておらず、先の支出予定は資金繰りカレンダー（CfPlan）に一本化している。
 
 // 支出の分類（損益表の費用内訳に使う。引出明細に付ける。収入側では未使用）
 export type ExpenseCategory = 'ingredient' | 'supplies' | 'labor' | 'rent' | 'utility' | 'other'
@@ -202,17 +171,8 @@ export interface Staff {
   transport: number  // 1回の出勤あたりの交通費
 }
 
-// シフトの曜日パターン（「毎週土曜は都丸が10:00〜15:00」のような定型）
-// これを月にまとめて適用してシフト表を一気に作る
-export interface ShiftPatternEntry {
-  id: string
-  staffName: string
-  clockIn: string
-  clockOut: string
-}
-
-// index 0=日 … 6=土
-export type ShiftPattern = Record<number, ShiftPatternEntry[]>
+// シフトの曜日パターン（ShiftPattern）は2026-09の画面刷新で廃止した。
+// シフトはLINE勤怠ボットの打刻で入るようになり、アプリ側で組む必要がなくなったため。
 
 // 出勤シフト1件（誰が・何時から何時まで働いたか）
 // 労働時間はclockIn/clockOutから自動計算、日給 = 時間 × hourlyWage + transport

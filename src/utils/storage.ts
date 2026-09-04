@@ -1,4 +1,4 @@
-import type { Settings, Loan, ScheduledPayment, BalanceReport, ReportPending, BucketDay, CashDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate, MonthBudget, BudgetSet, ShiftPattern, ShiftPatternEntry } from '../types'
+import type { Settings, BalanceReport, ReportPending, BucketDay, CashDay, LineItem, ExpenseCategory, ShiftEntry, Staff, ItemLabelSet, LabelDef, TaxRate, MonthBudget, BudgetSet } from '../types'
 import { DEFAULT_TAX_RATE, DEFAULT_SALES_TAX_RATE, EXPENSE_CATEGORY_LABEL } from '../types'
 import { supabase } from './supabaseClient'
 
@@ -307,33 +307,6 @@ export const budgetFor = (set: BudgetSet, month: string): MonthBudget => {
   }
 }
 
-// シフトの曜日パターン（設定は「シフト作成」画面から）
-export const defaultShiftPattern = (): ShiftPattern => ({ 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] })
-
-export const migrateShiftPattern = (raw: any): ShiftPattern => {
-  const out = defaultShiftPattern()
-  if (!raw) return out
-  for (let dow = 0; dow < 7; dow++) {
-    const list = Array.isArray(raw[dow]) ? raw[dow] : []
-    out[dow] = list
-      .filter((e: any) => e && typeof e.staffName === 'string')
-      .map((e: any) => ({
-        id: e.id ?? newItemId(),
-        staffName: e.staffName,
-        clockIn: e.clockIn ?? '',
-        clockOut: e.clockOut ?? '',
-      }))
-  }
-  return out
-}
-
-export const newPatternEntry = (staff?: Staff): ShiftPatternEntry => ({
-  id: newItemId(),
-  staffName: staff?.name ?? '',
-  clockIn: '10:00',
-  clockOut: '14:30',
-})
-
 // デフォルト設定：対象月は常に今月
 const currentMonthStr = () => {
   const d = new Date()
@@ -344,24 +317,9 @@ export const defaultSettings = (): Settings => ({
   targetMonth: currentMonthStr(),
 })
 
-// デフォルト借入・立替金
-export const defaultLoans = (): Loan[] => [
-  { id: 'yamashita', lender: '山下智子', borrowedDate: '2026-06-24',
-    totalAmount: 170000, paidAmount: 0, priority: 'high', note: '' },
-  { id: 'mukai', lender: '薙刀', borrowedDate: '',
-    totalAmount: 30000, paidAmount: 0, priority: 'medium', note: '現金売上からの立替分。総額は変動あり' },
-]
-
-// デフォルト資金繰り予定（固定費・変動費・突発の初期セット。すべて支出=out）
-export const defaultPayments = (): ScheduledPayment[] => [
-  { id: 'rent', name: '家賃', category: 'fixed', direction: 'out', amount: 0, bucket: 'corp', dayOfMonth: 25, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'uq', name: 'UQ mobile', category: 'fixed', direction: 'out', amount: 4381, bucket: 'corp', dayOfMonth: 15, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'googleone', name: 'Google One', category: 'fixed', direction: 'out', amount: 1450, bucket: 'corp', dayOfMonth: 15, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'amazon', name: 'Amazon プライム', category: 'fixed', direction: 'out', amount: 600, bucket: 'corp', dayOfMonth: 15, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'claude', name: 'Claude Pro', category: 'fixed', direction: 'out', amount: 3671, bucket: 'corp', dayOfMonth: 15, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'gmogw', name: 'GMO Payment GW', category: 'fixed', direction: 'out', amount: 2338, bucket: 'corp', dayOfMonth: 15, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'utility', name: '水道光熱費', category: 'variable', direction: 'out', amount: 0, bucket: 'corp', dayOfMonth: 10, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'salary', name: 'スタッフ給与', category: 'variable', direction: 'out', amount: 0, bucket: 'corp', dayOfMonth: 25, dueDate: null, linkedLoanId: null, note: '', active: true },
-  { id: 'mukai-return', name: '薙刀への返却', category: 'adhoc', direction: 'out', amount: 30000, bucket: 'cash', dayOfMonth: null, dueDate: null, linkedLoanId: 'mukai', note: '', active: true },
-  { id: 'yamashita-repay', name: '山下智子への返済', category: 'adhoc', direction: 'out', amount: 0, bucket: 'corp', dayOfMonth: null, dueDate: null, linkedLoanId: 'yamashita', note: '現在は返済予定なし', active: false },
-]
+// 借入（defaultLoans）と資金繰り予定（defaultPayments）はここにあったが、2026-09の画面刷新で廃止した。
+// Supabaseを確認したところ `birdmen:loans` / `birdmen:payments` は一度も保存されておらず、
+// 画面にはこのコード内の初期値が表示されていただけだった（＝機能として使われていなかった）。
+// 先の支出予定は資金繰りカレンダー（`birdmen:cf-plan`）に一本化している。
+// 参考までに、初期値に入っていた毎月の固定費：UQ mobile 4,381／Google One 1,450／Amazon プライム 600／
+// Claude Pro 3,671／GMO Payment GW 2,338（いずれも毎月15日）、家賃（25日）、水道光熱費（10日）
