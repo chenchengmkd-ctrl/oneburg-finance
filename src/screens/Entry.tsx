@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '../stores/appStore'
 import { fmt, fmtShort, fmtHours, getDayOfWeek, isWeekend } from '../utils/calculations'
 import {
-  defaultReport, newShiftEntry, sumNet, sumShiftPay, calcShiftHours,
+  defaultReport, newShiftEntry, sumNet, sumShiftPay, workedShiftHours,
   usedLabelDefs, usedVendors, applyShiftsToReport, salesTaxRateOf, toNet,
 } from '../utils/storage'
 import type { BalanceReport, ExpenseCategory, LineItem, ShiftEntry, TaxRate } from '../types'
@@ -140,7 +140,7 @@ export default function Entry() {
           open={editShifts} onToggle={() => setEditShifts(v => !v)}>
           <div className="space-y-2">
             {shifts.map(s => {
-              const hours = calcShiftHours(s.clockIn, s.clockOut)
+              const hours = workedShiftHours(s)
               return (
                 <div key={s.id} className="flex flex-wrap items-center gap-2 border-b border-gray-50 pb-2 last:border-0">
                   <select value={s.staffName} onChange={e => onPickStaff(s.id, e.target.value)}
@@ -153,6 +153,12 @@ export default function Entry() {
                   <span className="text-xs text-gray-400">〜</span>
                   <input type="time" value={s.clockOut} onChange={e => updateShift(s.id, { clockOut: e.target.value })}
                     className="text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-gray-400">休憩</span>
+                    <NumberInput value={s.breakMinutes ?? 0} onChange={v => updateShift(s.id, { breakMinutes: v })}
+                      className="w-14 text-right text-xs border border-gray-200 rounded px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                    <span className="text-[10px] text-gray-400">分</span>
+                  </div>
                   <span className="text-xs text-gray-400 w-16 shrink-0">{hours > 0 ? fmtHours(hours) : '-'}</span>
                   <div className="flex items-center gap-1">
                     <span className="text-[10px] text-gray-400">交通費</span>

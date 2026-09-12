@@ -132,8 +132,16 @@ export const calcShiftHours = (clockIn: string, clockOut: string): number => {
   return mins > 0 ? mins / 60 : 0
 }
 
+export const breakMinutesOf = (s: ShiftEntry): number => Math.max(0, s.breakMinutes || 0)
+
+// 休憩時間を差し引いた実労働時間（時間の小数）。勤怠アプリの「休憩」コマンドで記録される
+export const workedShiftHours = (s: ShiftEntry): number => {
+  const net = calcShiftHours(s.clockIn, s.clockOut) - breakMinutesOf(s) / 60
+  return net > 0 ? net : 0
+}
+
 // 日給（1円未満は四捨五入）
-export const shiftPay = (s: ShiftEntry) => Math.round(calcShiftHours(s.clockIn, s.clockOut) * s.hourlyWage + s.transport)
+export const shiftPay = (s: ShiftEntry) => Math.round(workedShiftHours(s) * s.hourlyWage + s.transport)
 
 // 名前も時刻も未入力の空行かどうか（保存前に除外する用）
 export const isBlankShift = (s: ShiftEntry) => !s.staffName && !s.clockIn && !s.clockOut

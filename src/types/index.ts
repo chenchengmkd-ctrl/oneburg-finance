@@ -183,6 +183,7 @@ export interface ShiftEntry {
   clockOut: string  // "HH:MM"
   hourlyWage: number
   transport: number
+  breakMinutes?: number  // 休憩時間(分)。勤務時間・給与から差し引く。未設定は0扱い（勤怠アプリ側の「休憩」コマンドで記録）
 }
 
 // 日次残高報告（毎日の報告そのもの）
